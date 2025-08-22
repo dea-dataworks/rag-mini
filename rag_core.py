@@ -1,14 +1,17 @@
 from typing import List
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import Chroma
+
 from pypdf import PdfReader
-import io
-import os
+import io, shutil, os
 
 # # ---------- HELPERS (stubs) ----------
 def read_txt(file_obj: io.BytesIO) -> str:
     """Decode a .txt upload to plain text (UTF-8 fallback)."""
     try:
+        file_obj.seek(0) 
         return file_obj.read().decode("utf-8", errors="ignore")
     except Exception:
         return ""
@@ -16,6 +19,7 @@ def read_txt(file_obj: io.BytesIO) -> str:
 def read_pdf(file_obj: io.BytesIO) -> str:
     """Extract text from a text-based PDF (no OCR)."""
     try:
+        file_obj.seek(0) 
         reader = PdfReader(file_obj)
         pages = []
         for page in reader.pages:
@@ -67,15 +71,28 @@ def chunk_documents(docs, size: int, overlap: int):
     )
     return splitter.split_documents(docs)
 
-# def _get_embeddings(model_name: str):
-#     """Return an OllamaEmbeddings instance."""
-#     # TODO M1: implement (lazy import langchain_ollama + langchain_community)
-#     return None
+def get_embeddings(model_name: str):
+    """Return an OllamaEmbeddings instance."""
+    try:
+        return OllamaEmbeddings(model=model_name)
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not initialize embeddings for '{model_name}'. "
+            f"Make sure you've pulled it with `ollama pull {model_name}`."
+        ) from e
 
-# def _build_or_load_vectorstore(chunks: List[Document], embedding, persist_dir: str, overwrite: bool):
-#     """Create or load a Chroma vector store and persist it."""
-#     # TODO M1: implement; if overwrite=True, clear persist_dir first
-#     return None
+def build_or_load_vectorstore(chunks, embedding, persist_dir: str, overwrite: bool):
+    """Create or load a Chroma vector store and persist it."""
+    if overwrite and os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir, ignore_errors=True)
+    if chunks and len(chunks) > 0:
+        vs = Chroma.from_documents(
+            chunks, embedding=embedding, persist_directory=persist_dir
+        )
+    else:
+        vs = Chroma(embedding_function=embedding, persist_directory=persist_dir)
+    vs.persist()
+    return vs
 
 # ---------- Functions ----------
 
@@ -102,12 +119,14 @@ def build_index_from_files(
 
     docs = files_to_documents(uploaded_files)
     chunks = chunk_documents(docs, size=chunk_size, overlap=chunk_overlap)
-
-    # TODO: get embeddings
-    embedding = None
-
-    # TODO: build/load vector store
-    vs = None
+    
+    embedding = get_embeddings(embed_model)
+    vs = build_or_load_vectorstore(
+        chunks=chunks,
+        embedding=embedding,
+        persist_dir=persist_dir,
+        overwrite=overwrite,
+    )
 
     stats = {
         "num_docs": len(docs),

@@ -22,7 +22,7 @@ with st.sidebar:
     st.header("⚙️ Settings")
     # TODO M1: model selectors once logic is wired
     llm_model = st.selectbox("LLM (Ollama)", ["mistral"], index=0, disabled=True)
-    embed_model = st.text_input("Embedding model (Ollama)", value="nomic-embed-text", disabled=True)
+    embed_model = "nomic-embed-text"
     chunk_size = st.number_input("Chunk size", 200, 4000, 800, 50, disabled=True)
     chunk_overlap = st.number_input("Chunk overlap", 0, 1000, 120, 10, disabled=True)
     top_k = st.slider("Top-k retrieval", 1, 10, 4, disabled=True)
@@ -52,24 +52,21 @@ if build_btn:
         st.warning("Please upload at least one .pdf or .txt file.")
     else:
         with st.spinner("Reading & chunking…"):
-            vs, stats = build_index_from_files(
-                uploaded_files=uploaded_files,
-                embed_model="nomic-embed-text",  # we'll make this a real control later
-                chunk_size=800,
-                chunk_overlap=120,
-                persist_dir="rag_store",
-                overwrite=False,
-            )
-
-        # store VS for later (M2)
-        st.session_state["vs"] = vs
-
-        # show quick feedback
-        st.success(
-            f"Index step (M1) called — docs: {stats.get('num_docs', 0)}, "
-            f"chunks: {stats.get('num_chunks', 0)}"
-        )
-        st.caption(f"Sources: {', '.join(stats.get('sources', [])) or 'None'}")
+            try:
+                vs, stats = build_index_from_files(
+                    uploaded_files=uploaded_files,
+                    embed_model=embed_model,    
+                    chunk_size=800,
+                    chunk_overlap=120,
+                    persist_dir="rag_store",
+                    overwrite=False,
+                )
+                st.session_state["vs"] = vs
+                st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
+                st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
+            except Exception as e:
+                st.error(f"Index build failed: {e}")
+                st.info("Tip: run `ollama pull nomic-embed-text` (or another embedding model) and try again.")
 
 # ---------- Q&A (M2) ----------
 st.subheader("2) Ask questions about your docs")
