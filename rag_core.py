@@ -3,6 +3,7 @@ from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_ollama import ChatOllama
 
 from pypdf import PdfReader
 import io, shutil, os
@@ -93,6 +94,41 @@ def build_or_load_vectorstore(chunks, embedding, persist_dir: str, overwrite: bo
         vs = Chroma(embedding_function=embedding, persist_directory=persist_dir)
     vs.persist()
     return vs
+
+# --- retrieval ---
+def retrieve(vs, query: str, k: int):
+    """Return top-k relevant chunks (LangChain Documents)."""
+    if vs is None:
+        return []
+    retriever = vs.as_retriever(search_kwargs={"k": int(k)})
+    return retriever.get_relevant_documents(query)
+
+
+# --- load existing store on app start ---
+def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
+    """Try to open an existing Chroma store; return vs or None."""
+    if not os.path.exists(persist_dir):
+        return None
+    embedding = OllamaEmbeddings(model=embed_model)
+    try:
+        return Chroma(embedding_function=embedding, persist_directory=persist_dir)
+    except Exception:
+        return None
+    
+# --- answering ---    
+def build_prompt(context: str, question: str) -> str:
+    return (
+        "You are a helpful assistant. Answer ONLY from the provided context.\n"
+        "If the answer isn't in the context, say you don't know.\n\n"
+        f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    )
+
+def call_llm(prompt: str, model_name: str = "mistral", temperature: float = 0.2) -> str:
+    llm = ChatOllama(model=model_name, temperature=temperature)
+    resp = llm.invoke(prompt)
+    return getattr(resp, "content", str(resp))
+
+
 
 # ---------- Functions ----------
 
