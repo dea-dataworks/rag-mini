@@ -4,6 +4,10 @@ from typing import List
 
 import streamlit as st
 from langchain.schema import Document
+from rag_core import build_index_from_files
+
+if "vs" not in st.session_state:
+    st.session_state["vs"] = None
 
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.1"
@@ -36,37 +40,6 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
 )
 
-# ---------- HELPERS (stubs) ----------
-def _read_txt(file: io.BytesIO) -> str:
-    """Return decoded text from .txt"""
-    # TODO M1: implement
-    return ""
-
-def _read_pdf(file: io.BytesIO) -> str:
-    """Return extracted text from a text-based PDF (no OCR)"""
-    # TODO M1: implement via pypdf.PdfReader
-    return ""
-
-def _files_to_documents(files) -> List[Document]:
-    """Convert uploaded files to LangChain Documents with metadata."""
-    # TODO M1: implement; set metadata['source'] to filename
-    return []
-
-def _chunk_documents(docs: List[Document], size: int, overlap: int) -> List[Document]:
-    """Split docs into chunks (RecursiveCharacterTextSplitter)."""
-    # TODO M1: implement
-    return []
-
-def _get_embeddings(model_name: str):
-    """Return an OllamaEmbeddings instance."""
-    # TODO M1: implement (lazy import langchain_ollama + langchain_community)
-    return None
-
-def _build_or_load_vectorstore(chunks: List[Document], embedding, persist_dir: str, overwrite: bool):
-    """Create or load a Chroma vector store and persist it."""
-    # TODO M1: implement; if overwrite=True, clear persist_dir first
-    return None
-
 # ---------- INDEX BUILD (M1) ----------
 col_a, col_b = st.columns([2, 1])
 with col_a:
@@ -78,14 +51,25 @@ if build_btn:
     if not uploaded_files:
         st.warning("Please upload at least one .pdf or .txt file.")
     else:
-        with st.spinner("Reading & chunking… (M1)"):
-            # TODO M1:
-            # 1) files -> docs
-            # 2) docs -> chunks
-            # 3) get embeddings
-            # 4) build/load vector store (persist)
-            pass
-        st.success("Index step (M1) placeholder complete — now implement the TODOs above.")
+        with st.spinner("Reading & chunking…"):
+            vs, stats = build_index_from_files(
+                uploaded_files=uploaded_files,
+                embed_model="nomic-embed-text",  # we'll make this a real control later
+                chunk_size=800,
+                chunk_overlap=120,
+                persist_dir="rag_store",
+                overwrite=False,
+            )
+
+        # store VS for later (M2)
+        st.session_state["vs"] = vs
+
+        # show quick feedback
+        st.success(
+            f"Index step (M1) called — docs: {stats.get('num_docs', 0)}, "
+            f"chunks: {stats.get('num_chunks', 0)}"
+        )
+        st.caption(f"Sources: {', '.join(stats.get('sources', [])) or 'None'}")
 
 # ---------- Q&A (M2) ----------
 st.subheader("2) Ask questions about your docs")
