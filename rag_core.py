@@ -100,9 +100,11 @@ def retrieve(vs, query: str, k: int):
     """Return top-k relevant chunks (LangChain Documents)."""
     if vs is None:
         return []
-    retriever = vs.as_retriever(search_kwargs={"k": int(k)})
+    retriever = vs.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": int(k), "fetch_k": max(10, 3*int(k)), "lambda_mult": 0.7},
+    )
     return retriever.get_relevant_documents(query)
-
 
 # --- load existing store on app start ---
 def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
@@ -119,6 +121,7 @@ def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
 def build_prompt(context: str, question: str) -> str:
     return (
         "You are a helpful assistant. Answer ONLY from the provided context.\n"
+        "Use ALL relevant context; if multiple documents apply, combine them. Answer concisely.\n"
         "If the answer isn't in the context, say you don't know.\n\n"
         f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
     )
@@ -139,6 +142,7 @@ def build_index_from_files(
     chunk_overlap: int,
     persist_dir: str,
     overwrite: bool = False,
+    embedding_obj=None,  
 ):
     """
     Orchestrator for index building:
@@ -156,7 +160,8 @@ def build_index_from_files(
     docs = files_to_documents(uploaded_files)
     chunks = chunk_documents(docs, size=chunk_size, overlap=chunk_overlap)
     
-    embedding = get_embeddings(embed_model)
+    embedding = embedding_obj or get_embeddings(embed_model)
+    
     vs = build_or_load_vectorstore(
         chunks=chunks,
         embedding=embedding,

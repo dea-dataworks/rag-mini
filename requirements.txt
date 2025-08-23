@@ -1,6 +1,6 @@
-streamlit
-langchain
-langchain-community
-langchain-ollama
-chromadb
-pypdf
+streamlit==1.36.*
+langchain==0.2.*
+langchain-community==0.2.*
+langchain-ollama==0.1.*
+chromadb==0.5.*
+pypdf==4.*
