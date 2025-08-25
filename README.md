@@ -1,9 +1,8 @@
 # RAG Mini v0.1 (Scope-First Skeleton)
 
 A tiny, local Retrieval-Augmented Generation app (Streamlit + LangChain + Chroma + Ollama).  
-This repository starts with a scope-approved scaffold and TODOs. Implement features incrementally.
 
-V.01 Scope: 
+## Scope (v0.1) 
 Single‑turn Q&A over .txt/text‑PDFs, local only, no API keys.
 Not included: OCR/scanned PDFs, multi‑turn chat, web search.
 Models: Ollama mistral for answers, nomic-embed-text for embeddings.
@@ -75,11 +74,8 @@ Run Streamlit on another port:
 streamlit run app.py --server.port 8502
 ```
 
-
 - **Version conflicts during pip install**  
 If you hit resolver errors, try Python 3.12 and the pinned ranges in `requirements.txt`, then upgrade one-by-one if needed.
-
-
 
 ## License
 

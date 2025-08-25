@@ -2,5 +2,6 @@ streamlit==1.36.*
 langchain==0.2.*
 langchain-community==0.2.*
 langchain-ollama==0.1.*
-chromadb==0.5.*
+chromadb>=1.0.8,<2.0
 pypdf==4.*
+pypika>=0.48.9
