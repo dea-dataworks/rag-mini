@@ -1,4 +1,4 @@
-# RAG Mini v0.1 (Scope-First Skeleton)
+# RAG Mini v0.1 
 
 A tiny, local Retrieval-Augmented Generation app (Streamlit + LangChain + Chroma + Ollama).  
 
