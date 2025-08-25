@@ -1,8 +1,4 @@
-import os
-import io
-from typing import List
 import streamlit as st
-from langchain.schema import Document
 from rag_core import build_index_from_files
 from rag_core import load_vectorstore_if_exists
 from rag_core import retrieve, build_prompt, call_llm
@@ -24,12 +20,6 @@ def get_cached_embeddings(embed_model: str):
     # calls your rag_core.get_embeddings under the hood
     from rag_core import get_embeddings
     return get_embeddings(embed_model)
-
-# @st.cache_resource
-# def load_cached_vectorstore(embed_model: str, persist_dir: str):
-#     # optional convenience: load an existing store (no uploads)
-#     from rag_core import load_vectorstore_if_exists
-#     return load_vectorstore_if_exists(embed_model=embed_model, persist_dir=persist_dir)
 
 if "vs" not in st.session_state:
     st.session_state["vs"] = None

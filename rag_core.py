@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OllamaEmbeddings
@@ -30,9 +30,13 @@ def read_pdf(file_obj: io.BytesIO) -> str:
     except Exception:
         return ""
 
-def files_to_documents(uploaded_files) -> List[Document]:
-    """Turn Streamlit UploadedFile objects into LangChain Documents."""
+def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
+    """Turn Streamlit UploadedFile objects into LangChain Documents.
+    Returns: (docs, skipped) where skipped is a list of 'filename — reason'.
+    """
     docs: List[Document] = []
+    skipped: List[str] = []
+
     for uf in uploaded_files:
         name = uf.name
         ext = os.path.splitext(name)[1].lower()
@@ -42,9 +46,11 @@ def files_to_documents(uploaded_files) -> List[Document]:
         elif ext == ".pdf":
             text = read_pdf(uf)
         else:
+            skipped.append(f"{name} — unsupported file type ({ext})")
             continue  # ignore other types
 
         if not text or not text.strip():
+            skipped.append(f"{name} — no extractable text (empty or parse error)")
             continue  # skip empty files
 
         docs.append(
@@ -53,7 +59,7 @@ def files_to_documents(uploaded_files) -> List[Document]:
                 metadata={"source": name}
             )
         )
-    return docs
+    return docs, skipped
 
 def chunk_documents(docs, size: int, overlap: int):
     """
@@ -157,7 +163,7 @@ def build_index_from_files(
             {'num_docs': int, 'num_chunks': int, 'sources': list[str]}
     """
 
-    docs = files_to_documents(uploaded_files)
+    docs, skipped = files_to_documents(uploaded_files)
     chunks = chunk_documents(docs, size=chunk_size, overlap=chunk_overlap)
     
     embedding = embedding_obj or get_embeddings(embed_model)
@@ -173,6 +179,7 @@ def build_index_from_files(
         "num_docs": len(docs),
         "num_chunks": len(chunks),
         "sources": list({d.metadata.get("source", "unknown") for d in docs}),
+        "skipped_files": skipped,
     }
 
     return vs, stats

@@ -3,22 +3,23 @@
 A tiny, local Retrieval-Augmented Generation app (Streamlit + LangChain + Chroma + Ollama).  
 This repository starts with a scope-approved scaffold and TODOs. Implement features incrementally.
 
-## v0.1 Goals
+V.01 Scope: 
+Single‑turn Q&A over .txt/text‑PDFs, local only, no API keys.
+Not included: OCR/scanned PDFs, multi‑turn chat, web search.
+Models: Ollama mistral for answers, nomic-embed-text for embeddings.
+
+## v0.1 Steps
 - Upload `.pdf` / `.txt`
 - Chunk → Embed (Ollama) → Index (Chroma)
 - Retrieve top‑k and answer with sources
 - Local‑only (no API keys)
 
 ## Prerequisites
-- Python 3.11–3.13 (tested). If you hit install issues on 3.13, try 3.12.
+- Python 3.13 (tested). If you hit install issues on 3.13, try 3.12.
 - [Ollama](https://ollama.com) installed
-- Pull models:
-  
-  ```bash
-  ollama pull mistral
-  ollama pull nomic-embed-text
-  ```
+
 ## Quickstart
+# Make sure Ollama is running (menu bar / system tray) before launching Streamlit.
 
 ```bash
 python -m venv .venv
@@ -37,17 +38,6 @@ ollama pull nomic-embed-text
 streamlit run app.py
 ```
 
-## Milestones
-- M1: ingest + chunk + index
-- M2: retrieve + answer + cite
-- M3: polish UI + README examples
-
-## Notes
-
-- This is a minimal single‑file app for simplicity.
-- PDF parsing is text-only via pypdf. Scanned PDFs (images) won’t work unless you OCR them first.
-- OCR/scanned PDFs and multi‑turn chat are out of scope for v0.1.
-
 ## Troubleshooting
 
 - **“Index build failed: … Could not initialize embeddings for 'nomic-embed-text'”**  
@@ -61,7 +51,7 @@ ollama pull mistral
 Make sure the Ollama service is running, then rebuild the index. (This error is raised from the embedding init in code.) 
 
 - **“No vector store found. Build the index first (Step 1).”**  
-Click **uild / Load Index** after uploading files. Then try your question again.
+Click **Build / Load Index** after uploading files. Then try your question again.
 
 - **“No results. Try a simpler question or rebuild the index.”**  
 Your query didn’t match the chunks. Try a simpler/shorter question or rebuild the index with more/larger documents.
