@@ -3,6 +3,7 @@ from rag_core import build_index_from_files
 from rag_core import load_vectorstore_if_exists
 from rag_core import retrieve, build_prompt, call_llm
 import pandas as pd
+import os
 
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.1"
@@ -13,32 +14,11 @@ st.set_page_config(page_title="RAG Mini v0.1", layout="wide")
 st.title(APP_TITLE)
 st.caption("Local, simple Retrieval-Augmented Q&A (scope-first)")
 
-# --- Provider & API key ---
-with st.sidebar:
-    st.subheader("Provider")
-    # store in session to avoid clearing during reruns
-    openai_key = st.text_input("OpenAI API Key (optional)", type="password")
-    if "OPENAI_API_KEY" not in st.session_state or openai_key:
-        st.session_state["OPENAI_API_KEY"] = openai_key.strip()
-
-    provider = st.selectbox(
-        "LLM Provider",
-        options=["Ollama (local)", "OpenAI (API)"],
-        index=0 if not st.session_state.get("OPENAI_API_KEY") else 1,
-        help="Default is fully local. OpenAI requires an API key."
-    )
-
-    # pick model per provider (keep short curated lists)
-    if provider.startswith("Ollama"):
-        llm_model = st.selectbox("LLM Model", ["mistral"], index=0)
-    else:
-        disabled = not bool(st.session_state.get("OPENAI_API_KEY"))
-        if disabled:
-            st.info("Enter a valid OpenAI key to enable cloud models.", icon="🔐")
-        llm_model = st.selectbox("LLM Model", ["gpt-4o-mini", "gpt-4o"], index=0, disabled=disabled)
-
-    st.session_state["LLM_PROVIDER"] = "openai" if provider.startswith("OpenAI") else "ollama"
-    st.session_state["LLM_MODEL"] = llm_model
+# ---------- SESSION DEFAULTS ----------
+st.session_state.setdefault("PERSIST_DIR", PERSIST_DIR)
+st.session_state.setdefault("OPENAI_API_KEY", "")
+st.session_state.setdefault("LLM_PROVIDER", "ollama")
+st.session_state.setdefault("LLM_MODEL", "mistral")
 
 # ---------- HELPERS ----------
 
@@ -54,36 +34,94 @@ if "vs" not in st.session_state:
 # Try to load an existing store on startup so users can retrieve without re-uploading
 if st.session_state["vs"] is None:
     st.session_state["vs"] = load_vectorstore_if_exists(
-        embed_model= EMBED_MODEL,  
-        persist_dir= PERSIST_DIR,
+        embed_model= EMBED_MODEL,
+        persist_dir= st.session_state["PERSIST_DIR"],
     )
 
 # ---------- SIDEBAR SETTINGS ----------
 with st.sidebar:
     st.header("⚙️ Settings")
 
+    # --- Regular (simple) controls ---
     embed_model   = EMBED_MODEL  # keep embeddings local (Ollama) in v0.2
     chunk_size    = st.number_input("Chunk size", 200, 4000, 800, 50)
     chunk_overlap = st.number_input("Chunk overlap", 0, 1000, 120, 10)
     top_k         = st.slider("Top-k retrieval", 1, 10, 4)
-    
+
+    # Persist basic controls
     st.session_state.update({
         "CHUNK_SIZE": int(chunk_size),
         "CHUNK_OVERLAP": int(chunk_overlap),
         "TOP_K": int(top_k),
     })
 
+    # --- Advanced (foldable) ---
+    with st.expander("Advanced", expanded=False):
+        st.markdown("**Provider (hidden by default)**")
+
+        use_openai = st.checkbox("Use OpenAI (cloud)", value=False,
+                                 help="Default stays local with Ollama/mistral.")
+        if use_openai:
+            # API key + model select only when enabled
+            openai_key = st.text_input("OpenAI API Key", type="password")
+            if openai_key:
+                st.session_state["OPENAI_API_KEY"] = openai_key.strip()
+            disabled = not bool(st.session_state.get("OPENAI_API_KEY"))
+            if disabled:
+                st.info("Enter a valid OpenAI key to enable models.", icon="🔐")
+            llm_model = st.selectbox("OpenAI model", ["gpt-4o-mini", "gpt-4o"], index=0, disabled=disabled)
+            st.session_state["LLM_PROVIDER"] = "openai"
+            st.session_state["LLM_MODEL"]    = llm_model
+        else:
+            # Local default
+            llm_model = st.selectbox("Ollama model", ["mistral"], index=0)
+            st.session_state["LLM_PROVIDER"] = "ollama"
+            st.session_state["LLM_MODEL"]    = llm_model
+
+        st.markdown("---")
+        st.markdown("**Retrieval tuning**")
+
+        mmr_lambda = st.slider("MMR λ (0–1)", 0.0, 1.0, 0.7, 0.05,
+                               help="Balance relevance (→1) vs diversity (→0).")
+        enable_thresh = st.checkbox("Enable score threshold (hide low-similarity chunks)", value=False)
+        score_thresh  = st.slider("Score threshold", 0.0, 1.0, 0.4, 0.05, disabled=not enable_thresh)
+        enable_cap    = st.checkbox("Enable per-source cap", value=False,
+                                    help="Limit how many chunks can come from the same file.")
+        per_source_cap = st.number_input("Max chunks per source", 1, 10, 2, 1, disabled=not enable_cap)
+
+        st.session_state.update({
+            "MMR_LAMBDA": float(mmr_lambda),
+            "USE_SCORE_THRESH": bool(enable_thresh),
+            "SCORE_THRESH": float(score_thresh),
+            "USE_SOURCE_CAP": bool(enable_cap),
+            "PER_SOURCE_CAP": int(per_source_cap),
+        })
+
+        st.markdown("---")
+        st.markdown("**UX / Display**")
+
+        snippet_len = st.slider("Snippet length (chars)", 160, 600, 240, 10,
+                                help="UI only; does not change retrieval.")
+        show_debug  = st.checkbox("Show timings & debug", value=False,
+                                  help="Reveals load/split/embed/persist timing and skipped files detail.")
+        st.session_state.update({
+            "SNIPPET_LEN": int(snippet_len),
+            "SHOW_DEBUG": bool(show_debug),
+        })
+
+        st.markdown("---")
+        st.markdown("**Persistence (low-touch)**")
+
+        suffix = st.text_input("Index name (suffix only)", value="",
+                               placeholder="e.g., demo or client-A",
+                               help="Writes to rag_store/<suffix>. Leave blank to use the default store.")
+        active_persist_dir = os.path.join(PERSIST_DIR, suffix) if suffix.strip() else PERSIST_DIR
+        st.session_state["PERSIST_DIR"] = active_persist_dir
+        st.caption(f"Active index: `{active_persist_dir}`")
+
     st.markdown("---")
     st.markdown("**Implementation steps**")
     st.caption("1) Ingest → chunk → index\n2) Retrieve → answer → cite\n3) UI polish + docs")
-
-# ---------- FILE UPLOAD ----------
-# st.subheader("1) Upload documents")
-# uploaded_files = st.file_uploader(
-#     "Upload .pdf or .txt files",
-#     type=["pdf", "txt"],
-#     accept_multiple_files=True,
-# )
 
 # ---------- FILE UPLOAD ----------
 # create a resettable key so we can clear the uploader after a build
@@ -130,9 +168,10 @@ if build_btn:
                     embed_model=embed_model,
                     chunk_size=st.session_state.get("CHUNK_SIZE", 800),
                     chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
-                    persist_dir=PERSIST_DIR,
+                    persist_dir=st.session_state["PERSIST_DIR"],
                     embedding_obj=embedding,
                 )
+
             st.session_state["vs"] = vs
             st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
             st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
@@ -142,7 +181,7 @@ if build_btn:
                 st.warning("No valid text chunks were created. The index was not rebuilt.")
                 st.stop()
 
-            # Guard (b): show skipped files
+            # Guard (b): show skipped files 
             if stats.get("skipped_files"):
                 st.info("Skipped files: " + ", ".join(stats["skipped_files"]))
 
@@ -154,18 +193,28 @@ if build_btn:
                     for fname, meta in stats["per_file"].items()
                 ]
                 df_pf = pd.DataFrame(rows).sort_values("File").reset_index(drop=True)
-
-                # Newer Streamlit: supports hide_index
                 try:
                     st.dataframe(df_pf, use_container_width=True, hide_index=True)
                 except TypeError:
-                    # Fallback (older Streamlit): blank out the index
                     df_pf.index = [""] * len(df_pf)
-                    st.dataframe(df_pf, use_container_width=True)    
+                    st.dataframe(df_pf, use_container_width=True)
+
+            # Optional timings/debug (always outside per_file block)
+            if st.session_state.get("SHOW_DEBUG") and stats and isinstance(stats, dict):
+                if "timings" in stats:
+                    t = stats["timings"]
+                    st.caption(
+                        f"Timing — load: {t.get('load_docs','?')}s | "
+                        f"split: {t.get('split','?')}s | "
+                        f"embed: {t.get('embed','?')}s | "
+                        f"persist: {t.get('persist','?')}s | "
+                        f"total: {t.get('total','?')}s"
+                    )
+
         else:
             # ----- LOAD-ONLY PATH (fast) -----
             with st.spinner("Loading existing index…"):
-                vs = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=PERSIST_DIR)
+                vs = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=st.session_state["PERSIST_DIR"])
             if vs is None:
                 st.warning("No existing index found. Enable 'Rebuild from current uploads' and provide files.")
             else:
@@ -194,7 +243,11 @@ if preview_btn:
         st.error("No vector store found. Build the index first (Step 1).")
     else:
         with st.spinner("Retrieving…"):
-            hits_raw = retrieve(vs, question, k=top_k)
+            # Try to pass mmr if supported; otherwise fall back silently
+            try:
+                hits_raw = retrieve(vs, question, k=top_k, mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7))
+            except TypeError:
+                hits_raw = retrieve(vs, question, k=top_k)
 
         if not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
@@ -207,12 +260,31 @@ if preview_btn:
                 else:
                     norm.append((item, None))
 
+            # Optional: filter by score threshold
+            if st.session_state.get("USE_SCORE_THRESH"):
+                thr = st.session_state.get("SCORE_THRESH", 0.4)
+                norm = [(d, s) for (d, s) in norm if (isinstance(s, (float, int)) and s >= thr) or s is None]
+
+            # Optional: per-source cap
+            if st.session_state.get("USE_SOURCE_CAP"):
+                cap = st.session_state.get("PER_SOURCE_CAP", 2)
+                counts = {}
+                kept = []
+                for d, s in norm:
+                    src = (d.metadata or {}).get("source", "unknown")
+                    counts[src] = counts.get(src, 0) + 1
+                    if counts[src] <= cap:
+                        kept.append((d, s))
+                norm = kept
+
             st.markdown("### Chunk Inspector")
             rows = []
+            maxlen = st.session_state.get("SNIPPET_LEN", 240)
             for i, (doc, score) in enumerate(norm, start=1):
                 meta = doc.metadata or {}
-                snippet = (doc.page_content or "")[:240].replace("\n", " ")
-                if len(doc.page_content or "") > 240:
+                full = (doc.page_content or "").replace("\n", " ")
+                snippet = full[:maxlen]
+                if len(full) > maxlen:
                     snippet += "…"
                 rows.append({
                     "Rank": i,
@@ -235,12 +307,40 @@ if answer_btn:
         st.error("No vector store found. Build the index first (Step 1).")
     else:
         with st.spinner("Retrieving…"):
-            hits_raw = retrieve(vs, question, k=top_k)
+            try:
+                hits_raw = retrieve(vs, question, k=top_k, mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7))
+            except TypeError:
+                hits_raw = retrieve(vs, question, k=top_k)
+
         if not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
         else:
-            # normalize to docs list
-            docs_only = [h[0] if isinstance(h, tuple) else h for h in hits_raw]
+            # normalize to [(doc, score)]
+            norm = []
+            for item in hits_raw:
+                if isinstance(item, tuple) and len(item) == 2:
+                    norm.append(item)
+                else:
+                    norm.append((item, None))
+
+            if st.session_state.get("USE_SCORE_THRESH"):
+                thr = st.session_state.get("SCORE_THRESH", 0.4)
+                norm = [(d, s) for (d, s) in norm if (isinstance(s, (float, int)) and s >= thr) or s is None]
+
+            if st.session_state.get("USE_SOURCE_CAP"):
+                cap = st.session_state.get("PER_SOURCE_CAP", 2)
+                counts = {}
+                kept = []
+                for d, s in norm:
+                    src = (d.metadata or {}).get("source", "unknown")
+                    counts[src] = counts.get(src, 0) + 1
+                    if counts[src] <= cap:
+                        kept.append((d, s))
+                norm = kept
+
+            # docs only for prompting
+            docs_only = [d for (d, _) in norm]
+
             context_text = "\n\n---\n\n".join([d.page_content for d in docs_only])
             prompt = build_prompt(context_text, question)
 
@@ -261,7 +361,7 @@ if answer_btn:
                 m = d.metadata or {}
                 tag = m.get("source", "unknown")
                 if m.get("page"):
-                    tag += f" p. {m['page']}"
+                    tag += f" p.{m['page']}"
                 cited.append(tag)
             cited = sorted(set(cited))
             if cited:
