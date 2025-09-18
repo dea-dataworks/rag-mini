@@ -101,7 +101,7 @@ clear_col, _ = st.columns([1, 3])
 with clear_col:
     if st.button("Clear uploads"):
         st.session_state["UPLOAD_KEY"] += 1  # re-key the widget -> clears files
-        st.experimental_rerun()
+        st.rerun()
 
 
 # ---------- INDEX BUILD (M1) ----------
@@ -135,6 +135,16 @@ if build_btn:
             st.session_state["vs"] = vs
             st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
             st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
+
+            # Guard (a): warn if no valid chunks
+            if stats["num_chunks"] == 0:
+                st.warning("No valid text chunks were created. The index was not rebuilt.")
+                st.stop()
+
+            # Guard (b): show skipped files
+            if stats.get("skipped_files"):
+                st.info("Skipped files: " + ", ".join(stats["skipped_files"]))
+
             # Per-file table (pages & chunks)
             if stats.get("per_file"):
                 st.markdown("##### Per-file stats")
