@@ -236,4 +236,4 @@ def build_index_from_files(
             "pages": len(page_count[src]) if src in page_count else 1,
             "chunks": chunk_count[src],
         }
-        return vs, stats
+    return vs, stats
