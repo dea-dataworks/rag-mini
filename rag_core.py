@@ -103,15 +103,15 @@ def build_or_load_vectorstore(chunks, embedding, persist_dir: str):
     """
     Build a Chroma vector store when chunks are provided (embeds & persists).
     If chunks is empty, return a handle to an existing store (no embedding).
+    Note: Newer langchain-chroma persists on create; no .persist() method exists.
     """
     if chunks and len(chunks) > 0:
-        vs = Chroma.from_documents(
+        # Creates/updates a persisted collection immediately.
+        return Chroma.from_documents(
             chunks, embedding=embedding, persist_directory=persist_dir
         )
-    else:
-        vs = Chroma(embedding_function=embedding, persist_directory=persist_dir)
-    vs.persist()
-    return vs
+    # Open existing collection (no embed pass)
+    return Chroma(embedding_function=embedding, persist_directory=persist_dir)
 
 # --- retrieval ---
 def retrieve(vs, query: str, k: int, mmr_lambda: float = 0.7):
@@ -236,3 +236,4 @@ def build_index_from_files(
             "pages": len(page_count[src]) if src in page_count else 1,
             "chunks": chunk_count[src],
         }
+        return vs, stats

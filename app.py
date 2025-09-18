@@ -2,6 +2,7 @@ import streamlit as st
 from rag_core import build_index_from_files
 from rag_core import load_vectorstore_if_exists
 from rag_core import retrieve, build_prompt, call_llm
+import pandas as pd
 
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.1"
@@ -148,10 +149,19 @@ if build_btn:
             # Per-file table (pages & chunks)
             if stats.get("per_file"):
                 st.markdown("##### Per-file stats")
-                st.table([
-                    {"File": fname, "Pages": meta.get("pages", ""), "Chunks": meta.get("chunks", "")}
+                rows = [
+                    {"File": fname, "Pages": meta.get("pages", 0), "Chunks": meta.get("chunks", 0)}
                     for fname, meta in stats["per_file"].items()
-                ])
+                ]
+                df_pf = pd.DataFrame(rows).sort_values("File").reset_index(drop=True)
+
+                # Newer Streamlit: supports hide_index
+                try:
+                    st.dataframe(df_pf, use_container_width=True, hide_index=True)
+                except TypeError:
+                    # Fallback (older Streamlit): blank out the index
+                    df_pf.index = [""] * len(df_pf)
+                    st.dataframe(df_pf, use_container_width=True)    
         else:
             # ----- LOAD-ONLY PATH (fast) -----
             with st.spinner("Loading existing index…"):
