@@ -81,8 +81,17 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("**Retrieval tuning**")
 
+        # Hybrid retrieval toggle (BM25 + Dense via RRF)
+        use_hybrid = st.checkbox(
+            "Hybrid retrieval (BM25 + Dense via RRF)",
+            value=False,
+            help="BM25 over chunk text + dense (Chroma). Results fused by Reciprocal Rank Fusion."
+        )
+        st.session_state["RETRIEVE_MODE"] = "hybrid" if use_hybrid else "dense"
+
         mmr_lambda = st.slider("MMR λ (0–1)", 0.0, 1.0, 0.7, 0.05,
                                help="Balance relevance (→1) vs diversity (→0).")
+
         enable_thresh = st.checkbox("Enable score threshold (hide low-similarity chunks)", value=False)
         score_thresh  = st.slider("Score threshold", 0.0, 1.0, 0.4, 0.05, disabled=not enable_thresh)
         enable_cap    = st.checkbox("Enable per-source cap", value=False,
@@ -244,10 +253,18 @@ if preview_btn:
     else:
         with st.spinner("Retrieving…"):
             # Try to pass mmr if supported; otherwise fall back silently
+            mode = st.session_state.get("RETRIEVE_MODE", "dense")
             try:
-                hits_raw = retrieve(vs, question, k=top_k, mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7))
+                hits_raw = retrieve(
+                    vs, question,
+                    k=top_k,
+                    mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
+                    mode=mode,
+                )
             except TypeError:
+                # Fallback for older retrieve() signatures
                 hits_raw = retrieve(vs, question, k=top_k)
+
 
         if not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
@@ -307,10 +324,17 @@ if answer_btn:
         st.error("No vector store found. Build the index first (Step 1).")
     else:
         with st.spinner("Retrieving…"):
+            mode = st.session_state.get("RETRIEVE_MODE", "dense")
             try:
-                hits_raw = retrieve(vs, question, k=top_k, mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7))
+                hits_raw = retrieve(
+                    vs, question,
+                    k=top_k,
+                    mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
+                    mode=mode,
+                )
             except TypeError:
                 hits_raw = retrieve(vs, question, k=top_k)
+
 
         if not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
@@ -355,17 +379,43 @@ if answer_btn:
             st.markdown("### 🧠 Answer")
             st.write(answer)
 
-            # compact citations
-            cited = []
+            # --- Citations (dedup + page-anchored) ---
+            cited_pairs = []  # list of (source, page or None)
             for d in docs_only:
                 m = d.metadata or {}
-                tag = m.get("source", "unknown")
-                if m.get("page"):
-                    tag += f" p.{m['page']}"
-                cited.append(tag)
-            cited = sorted(set(cited))
-            if cited:
-                st.caption("Sources: " + "; ".join(cited))
+                src = m.get("source", "unknown")
+                pg = m.get("page", None)
+                cited_pairs.append((src, pg))
+
+            # Dedup while preserving stable ordering by (source, page)
+            uniq = {}
+            for src, pg in cited_pairs:
+                key = (src, pg)
+                if key not in uniq:
+                    uniq[key] = None
+            # Sort by source name then page (None treated as 0)
+            ordered = sorted(uniq.keys(), key=lambda t: (t[0], t[1] or 0))
+
+            display_tags = []
+            for src, pg in ordered:
+                if pg:
+                    display_tags.append(f"{src} p.{pg}")
+                else:
+                    display_tags.append(src)
+
+            if display_tags:
+                st.caption("Sources: " + "; ".join(display_tags))
+
+            # --- Optional: Show cited chunks (subset used in the prompt) ---
+            with st.expander("Show cited chunks", expanded=False):
+                maxlen = st.session_state.get("SNIPPET_LEN", 240)
+                for i, d in enumerate(docs_only, start=1):
+                    m = d.metadata or {}
+                    src = m.get("source", "unknown")
+                    pg  = m.get("page", None)
+                    header = f"{src} p.{pg}" if pg else src
+                    st.markdown(f"**Chunk {i} — {header}**")
+                    st.write(d.page_content)
 
 # ---------- FOOTER ----------
 st.markdown("---")
