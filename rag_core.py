@@ -6,7 +6,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_ollama import ChatOllama
 
 from pypdf import PdfReader
-import io, shutil, os
+import io, os
 
 # # ---------- HELPERS (stubs) ----------
 def read_txt(file_obj: io.BytesIO) -> str:
@@ -63,13 +63,14 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
             skipped.append(f"{name} — no extractable text (empty or parse error)")
             continue  # skip empty files
 
-        # docs.append(
-        #     Document(
-        #         page_content=text,
-        #         metadata={"source": name}
-        #     )
-        # )
+        docs.append(
+            Document(
+                page_content=text,
+                metadata={"source": name}
+            )
+        )
     return docs, skipped
+
 
 def chunk_documents(docs, size: int, overlap: int):
     """
@@ -97,14 +98,12 @@ def get_embeddings(model_name: str):
             f"Could not initialize embeddings for '{model_name}'. "
             f"Make sure you've pulled it with `ollama pull {model_name}`."
         ) from e
-
-def build_or_load_vectorstore(chunks, embedding, persist_dir: str, overwrite: bool):
+    
+def build_or_load_vectorstore(chunks, embedding, persist_dir: str):
     """
     Build a Chroma vector store when chunks are provided (embeds & persists).
     If chunks is empty, return a handle to an existing store (no embedding).
     """
-    if overwrite and os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir, ignore_errors=True)
     if chunks and len(chunks) > 0:
         vs = Chroma.from_documents(
             chunks, embedding=embedding, persist_directory=persist_dir
@@ -187,7 +186,6 @@ def build_index_from_files(
     chunk_size: int,
     chunk_overlap: int,
     persist_dir: str,
-    overwrite: bool = False,
     embedding_obj=None,  
 ):
     """
@@ -212,14 +210,29 @@ def build_index_from_files(
         chunks=chunks,
         embedding=embedding,
         persist_dir=persist_dir,
-        overwrite=overwrite,
     )
 
     stats = {
-        "num_docs": len(docs),
-        "num_chunks": len(chunks),
-        "sources": list({d.metadata.get("source", "unknown") for d in docs}),
-        "skipped_files": skipped,
+    "num_docs": len(docs),
+    "num_chunks": len(chunks),
+    "sources": list({d.metadata.get("source", "unknown") for d in docs}),
+    "skipped_files": skipped,
+    "per_file": {}
     }
 
-    return vs, stats
+    # Count pages and chunks per file
+    from collections import defaultdict
+    page_count = defaultdict(set)
+    chunk_count = defaultdict(int)
+    for d in chunks:
+        src = d.metadata.get("source", "unknown")
+        pg = d.metadata.get("page", None)
+        if pg:
+            page_count[src].add(pg)
+        chunk_count[src] += 1
+
+    for src in stats["sources"]:
+        stats["per_file"][src] = {
+            "pages": len(page_count[src]) if src in page_count else 1,
+            "chunks": chunk_count[src],
+        }

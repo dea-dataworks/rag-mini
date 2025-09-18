@@ -65,13 +65,11 @@ with st.sidebar:
     chunk_size    = st.number_input("Chunk size", 200, 4000, 800, 50)
     chunk_overlap = st.number_input("Chunk overlap", 0, 1000, 120, 10)
     top_k         = st.slider("Top-k retrieval", 1, 10, 4)
-    overwrite_store = st.checkbox("Overwrite vector store", value=False)
-
+    
     st.session_state.update({
         "CHUNK_SIZE": int(chunk_size),
         "CHUNK_OVERLAP": int(chunk_overlap),
         "TOP_K": int(top_k),
-        "OVERWRITE_STORE": bool(overwrite_store),
     })
 
     st.markdown("---")
@@ -132,12 +130,18 @@ if build_btn:
                     chunk_size=st.session_state.get("CHUNK_SIZE", 800),
                     chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
                     persist_dir=PERSIST_DIR,
-                    overwrite=st.session_state.get("OVERWRITE_STORE", False),
                     embedding_obj=embedding,
                 )
             st.session_state["vs"] = vs
             st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
             st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
+            # Per-file table (pages & chunks)
+            if stats.get("per_file"):
+                st.markdown("##### Per-file stats")
+                st.table([
+                    {"File": fname, "Pages": meta.get("pages", ""), "Chunks": meta.get("chunks", "")}
+                    for fname, meta in stats["per_file"].items()
+                ])
         else:
             # ----- LOAD-ONLY PATH (fast) -----
             with st.spinner("Loading existing index…"):
@@ -148,17 +152,6 @@ if build_btn:
                 st.session_state["vs"] = vs
                 st.success("Loaded existing index.")
 
-        # Document Manager (wipe)
-        st.markdown("#### Document Manager")
-        wipe_col, _ = st.columns([1, 3])
-        with wipe_col:
-            if st.button("Wipe Index"):
-                import shutil, os
-                if os.path.isdir(PERSIST_DIR):
-                    shutil.rmtree(PERSIST_DIR, ignore_errors=True)
-                st.session_state["vs"] = None
-                st.success("Index wiped. Rebuild to continue.")
-
     except Exception as e:
         st.error(f"Index operation failed: {e}")
         st.info(f"Tip: run `ollama pull {EMBED_MODEL}` (or another embedding model) and try again.")
@@ -168,7 +161,7 @@ st.subheader("2) Ask questions about your docs")
 question = st.text_input("Your question", placeholder="e.g., What are the main conclusions?")
 
 # Retrieve & Answer button
-answer_btn = st.button("💬 Retrieve & Answer", use_container_width=True)
+answer_btn = st.button("Retrieve & Answer", use_container_width=True)
 # Preview Top Sources button
 preview_btn = st.button("Preview Top Sources", use_container_width=True)
 
