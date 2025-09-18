@@ -17,18 +17,22 @@ def read_txt(file_obj: io.BytesIO) -> str:
     except Exception:
         return ""
 
-def read_pdf(file_obj: io.BytesIO) -> str:
-    """Extract text from a text-based PDF (no OCR)."""
+def read_pdf_pages(file_obj: io.BytesIO, name: str):
+    """Extract text per page from a text-based PDF (no OCR)."""
     try:
-        file_obj.seek(0) 
+        file_obj.seek(0)
         reader = PdfReader(file_obj)
-        pages = []
-        for page in reader.pages:
+        out = []
+        for i, page in enumerate(reader.pages):
             text = page.extract_text() or ""
-            pages.append(text)
-        return "\n\n".join(pages).strip()
+            if text.strip():
+                out.append(Document(
+                    page_content=text,
+                    metadata={"source": name, "page": i + 1}
+                ))
+        return out
     except Exception:
-        return ""
+        return []
 
 def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
     """Turn Streamlit UploadedFile objects into LangChain Documents.
@@ -44,7 +48,13 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
         if ext == ".txt":
             text = read_txt(uf)
         elif ext == ".pdf":
-            text = read_pdf(uf)
+            pdf_docs = read_pdf_pages(uf, name)
+            if pdf_docs:
+                docs.extend(pdf_docs)
+                continue
+            else:
+                skipped.append(f"{name} — no extractable text (empty or parse error)")
+                continue
         else:
             skipped.append(f"{name} — unsupported file type ({ext})")
             continue  # ignore other types
@@ -53,12 +63,12 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
             skipped.append(f"{name} — no extractable text (empty or parse error)")
             continue  # skip empty files
 
-        docs.append(
-            Document(
-                page_content=text,
-                metadata={"source": name}
-            )
-        )
+        # docs.append(
+        #     Document(
+        #         page_content=text,
+        #         metadata={"source": name}
+        #     )
+        # )
     return docs, skipped
 
 def chunk_documents(docs, size: int, overlap: int):
@@ -89,7 +99,10 @@ def get_embeddings(model_name: str):
         ) from e
 
 def build_or_load_vectorstore(chunks, embedding, persist_dir: str, overwrite: bool):
-    """Create or load a Chroma vector store and persist it."""
+    """
+    Build a Chroma vector store when chunks are provided (embeds & persists).
+    If chunks is empty, return a handle to an existing store (no embedding).
+    """
     if overwrite and os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
     if chunks and len(chunks) > 0:
@@ -102,15 +115,27 @@ def build_or_load_vectorstore(chunks, embedding, persist_dir: str, overwrite: bo
     return vs
 
 # --- retrieval ---
-def retrieve(vs, query: str, k: int):
-    """Return top-k relevant chunks (LangChain Documents)."""
+def retrieve(vs, query: str, k: int, mmr_lambda: float = 0.7):
+    """
+    Return top-k relevant chunks with scores.
+    Output: list of (Document, score).
+    """
     if vs is None:
         return []
+
+    # First, get top-k via similarity with scores
+    results = vs.similarity_search_with_score(query, k=k)
+
+    # Optionally rerank/diversify via MMR (using lambda_mult)
     retriever = vs.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": int(k), "fetch_k": max(10, 3*int(k)), "lambda_mult": 0.7},
+        search_kwargs={"k": k, "fetch_k": max(10, 3*k), "lambda_mult": mmr_lambda},
     )
-    return retriever.get_relevant_documents(query)
+    mmr_docs = retriever.get_relevant_documents(query)
+
+    # Merge scores: map by content
+    score_map = {d.page_content: s for d, s in results}
+    return [(d, score_map.get(d.page_content)) for d in mmr_docs]
 
 # --- load existing store on app start ---
 def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
@@ -132,12 +157,27 @@ def build_prompt(context: str, question: str) -> str:
         f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
     )
 
-def call_llm(prompt: str, model_name: str = "mistral", temperature: float = 0.2) -> str:
-    llm = ChatOllama(model=model_name, temperature=temperature)
+def call_llm(
+    prompt: str,
+    provider: str = "ollama",
+    model_name: str = "mistral",
+    openai_api_key: str | None = None,
+    temperature: float = 0.2,
+) -> str:
+    """
+    Call LLM by provider.
+    provider: "ollama" | "openai"
+    """
+    if provider == "openai":
+        if not openai_api_key:
+            raise ValueError("OpenAI key not provided.")
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(model=model_name, temperature=temperature, api_key=openai_api_key)
+    else:
+        llm = ChatOllama(model=model_name, temperature=temperature)
+
     resp = llm.invoke(prompt)
     return getattr(resp, "content", str(resp))
-
-
 
 # ---------- Functions ----------
 

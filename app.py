@@ -12,6 +12,32 @@ st.set_page_config(page_title="RAG Mini v0.1", layout="wide")
 st.title(APP_TITLE)
 st.caption("Local, simple Retrieval-Augmented Q&A (scope-first)")
 
+# --- Provider & API key ---
+with st.sidebar:
+    st.subheader("Provider")
+    # store in session to avoid clearing during reruns
+    openai_key = st.text_input("OpenAI API Key (optional)", type="password")
+    if "OPENAI_API_KEY" not in st.session_state or openai_key:
+        st.session_state["OPENAI_API_KEY"] = openai_key.strip()
+
+    provider = st.selectbox(
+        "LLM Provider",
+        options=["Ollama (local)", "OpenAI (API)"],
+        index=0 if not st.session_state.get("OPENAI_API_KEY") else 1,
+        help="Default is fully local. OpenAI requires an API key."
+    )
+
+    # pick model per provider (keep short curated lists)
+    if provider.startswith("Ollama"):
+        llm_model = st.selectbox("LLM Model", ["mistral"], index=0)
+    else:
+        disabled = not bool(st.session_state.get("OPENAI_API_KEY"))
+        if disabled:
+            st.info("Enter a valid OpenAI key to enable cloud models.", icon="🔐")
+        llm_model = st.selectbox("LLM Model", ["gpt-4o-mini", "gpt-4o"], index=0, disabled=disabled)
+
+    st.session_state["LLM_PROVIDER"] = "openai" if provider.startswith("OpenAI") else "ollama"
+    st.session_state["LLM_MODEL"] = llm_model
 
 # ---------- HELPERS ----------
 
@@ -35,55 +61,107 @@ if st.session_state["vs"] is None:
 with st.sidebar:
     st.header("⚙️ Settings")
 
-    llm_model = st.selectbox("LLM (Ollama)", ["mistral"], index=0, disabled=True)
-    embed_model = EMBED_MODEL
-    chunk_size = st.number_input("Chunk size", 200, 4000, 800, 50, disabled=True)
-    chunk_overlap = st.number_input("Chunk overlap", 0, 1000, 120, 10, disabled=True)
-    top_k = st.slider("Top-k retrieval", 1, 10, 4)
-    overwrite_store = st.checkbox("Overwrite vector store", value=False, disabled=True)
+    embed_model   = EMBED_MODEL  # keep embeddings local (Ollama) in v0.2
+    chunk_size    = st.number_input("Chunk size", 200, 4000, 800, 50)
+    chunk_overlap = st.number_input("Chunk overlap", 0, 1000, 120, 10)
+    top_k         = st.slider("Top-k retrieval", 1, 10, 4)
+    overwrite_store = st.checkbox("Overwrite vector store", value=False)
+
+    st.session_state.update({
+        "CHUNK_SIZE": int(chunk_size),
+        "CHUNK_OVERLAP": int(chunk_overlap),
+        "TOP_K": int(top_k),
+        "OVERWRITE_STORE": bool(overwrite_store),
+    })
 
     st.markdown("---")
     st.markdown("**Implementation steps**")
     st.caption("1) Ingest → chunk → index\n2) Retrieve → answer → cite\n3) UI polish + docs")
 
 # ---------- FILE UPLOAD ----------
-st.subheader("1) Upload documents")
+# st.subheader("1) Upload documents")
+# uploaded_files = st.file_uploader(
+#     "Upload .pdf or .txt files",
+#     type=["pdf", "txt"],
+#     accept_multiple_files=True,
+# )
+
+# ---------- FILE UPLOAD ----------
+# create a resettable key so we can clear the uploader after a build
+if "UPLOAD_KEY" not in st.session_state:
+    st.session_state["UPLOAD_KEY"] = 0
+
 uploaded_files = st.file_uploader(
-    "Upload .pdf or .txt files",
+    "Upload .pdf or .txt",
     type=["pdf", "txt"],
     accept_multiple_files=True,
+    key=f"uploader_{st.session_state['UPLOAD_KEY']}",
 )
 
+# small control to clear uploads without restarting
+clear_col, _ = st.columns([1, 3])
+with clear_col:
+    if st.button("Clear uploads"):
+        st.session_state["UPLOAD_KEY"] += 1  # re-key the widget -> clears files
+        st.experimental_rerun()
+
+
 # ---------- INDEX BUILD (M1) ----------
+# --- Build / Load controls ---
+rebuild_from_uploads = st.checkbox(
+    "Rebuild from current uploads",
+    value=False,
+    help="If OFF, this will just load an existing index (fast). Turn ON to re-index the files above."
+)
+
 col_a, col_b = st.columns([2, 1])
 with col_a:
-    build_btn = st.button("🧱 Build / Load Index", type="primary", use_container_width=True)
+    build_btn = st.button("Build / Load Index", type="primary", use_container_width=True)
 with col_b:
     st.info("Step 1: Build the index before asking questions.", icon="ℹ️")
 
 if build_btn:
-    if not uploaded_files:
-        st.warning("Please upload at least one .pdf or .txt file.")
-    else:
-        with st.spinner("Reading & chunking…"):
-            try:
+    try:
+        if rebuild_from_uploads and uploaded_files:
+            # ----- REBUILD PATH (heavy) -----
+            with st.spinner("Reading, chunking, and indexing…"):
                 embedding = get_cached_embeddings(embed_model=EMBED_MODEL)
                 vs, stats = build_index_from_files(
                     uploaded_files=uploaded_files,
-                    embed_model=embed_model,    
-                    chunk_size=800,
-                    chunk_overlap=120,
+                    embed_model=embed_model,
+                    chunk_size=st.session_state.get("CHUNK_SIZE", 800),
+                    chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
                     persist_dir=PERSIST_DIR,
-                    overwrite=overwrite_store,
+                    overwrite=st.session_state.get("OVERWRITE_STORE", False),
                     embedding_obj=embedding,
                 )
+            st.session_state["vs"] = vs
+            st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
+            st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
+        else:
+            # ----- LOAD-ONLY PATH (fast) -----
+            with st.spinner("Loading existing index…"):
+                vs = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=PERSIST_DIR)
+            if vs is None:
+                st.warning("No existing index found. Enable 'Rebuild from current uploads' and provide files.")
+            else:
                 st.session_state["vs"] = vs
-                st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
-                st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
-            except Exception as e:
-                st.error(f"Index build failed: {e}")
-                st.info(f"Tip: run `ollama pull {EMBED_MODEL}` (or another embedding model) and try again.")
+                st.success("Loaded existing index.")
 
+        # Document Manager (wipe)
+        st.markdown("#### Document Manager")
+        wipe_col, _ = st.columns([1, 3])
+        with wipe_col:
+            if st.button("Wipe Index"):
+                import shutil, os
+                if os.path.isdir(PERSIST_DIR):
+                    shutil.rmtree(PERSIST_DIR, ignore_errors=True)
+                st.session_state["vs"] = None
+                st.success("Index wiped. Rebuild to continue.")
+
+    except Exception as e:
+        st.error(f"Index operation failed: {e}")
+        st.info(f"Tip: run `ollama pull {EMBED_MODEL}` (or another embedding model) and try again.")
 
 # ---------- Q&A (M2) ----------
 st.subheader("2) Ask questions about your docs")
@@ -103,25 +181,39 @@ if preview_btn:
         st.error("No vector store found. Build the index first (Step 1).")
     else:
         with st.spinner("Retrieving…"):
-            hits = retrieve(vs, question, k=top_k)
+            hits_raw = retrieve(vs, question, k=top_k)
 
-        if not hits:
+        if not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
         else:
-            st.markdown("### Sources (Top-k)")
-            # list unique sources
-            seen = set()
-            for h in hits:
-                src = h.metadata.get("source", "unknown")
-                if src not in seen:
-                    st.write(f"- {src}")
-                    seen.add(src)
+            # normalize to [(doc, score)]
+            norm = []
+            for item in hits_raw:
+                if isinstance(item, tuple) and len(item) == 2:
+                    norm.append(item)
+                else:
+                    norm.append((item, None))
 
-            # show retrieved chunks
+            st.markdown("### Chunk Inspector")
+            rows = []
+            for i, (doc, score) in enumerate(norm, start=1):
+                meta = doc.metadata or {}
+                snippet = (doc.page_content or "")[:240].replace("\n", " ")
+                if len(doc.page_content or "") > 240:
+                    snippet += "…"
+                rows.append({
+                    "Rank": i,
+                    "Score": f"{score:.4f}" if isinstance(score, (float, int)) else "—",
+                    "File": meta.get("source", "unknown"),
+                    "Page": meta.get("page", ""),
+                    "Snippet": snippet,
+                })
+            st.dataframe(rows, use_container_width=True)
+
             st.markdown("### Retrieved Chunks")
-            for i, h in enumerate(hits, start=1):
-                with st.expander(f"Chunk {i} — {h.metadata.get('source','unknown')}"):
-                    st.write(h.page_content)
+            for i, (doc, _) in enumerate(norm, start=1):
+                with st.expander(f"Chunk {i} — {doc.metadata.get('source','unknown')} p.{doc.metadata.get('page','')}"):
+                    st.write(doc.page_content)
 
 if answer_btn:
     if not question.strip():
@@ -130,24 +222,37 @@ if answer_btn:
         st.error("No vector store found. Build the index first (Step 1).")
     else:
         with st.spinner("Retrieving…"):
-            hits = retrieve(vs, question, k=top_k)  
-        if not hits:
+            hits_raw = retrieve(vs, question, k=top_k)
+        if not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
         else:
-            context_text = "\n\n---\n\n".join([h.page_content for h in hits])
+            # normalize to docs list
+            docs_only = [h[0] if isinstance(h, tuple) else h for h in hits_raw]
+            context_text = "\n\n---\n\n".join([d.page_content for d in docs_only])
             prompt = build_prompt(context_text, question)
+
             with st.spinner("Thinking…"):
-                answer = call_llm(prompt, model_name=llm_model)  
-            st.markdown("### Answer")
+                answer = call_llm(
+                    prompt,
+                    provider=st.session_state.get("LLM_PROVIDER", "ollama"),
+                    model_name=st.session_state.get("LLM_MODEL", "mistral"),
+                    openai_api_key=st.session_state.get("OPENAI_API_KEY"),
+                )
+
+            st.markdown("### 🧠 Answer")
             st.write(answer)
 
-            st.markdown("### Sources")
-            seen = set()
-            for h in hits:
-                src = h.metadata.get("source", "unknown")
-                if src not in seen:
-                    st.write(f"- {src}")
-                    seen.add(src)
+            # compact citations
+            cited = []
+            for d in docs_only:
+                m = d.metadata or {}
+                tag = m.get("source", "unknown")
+                if m.get("page"):
+                    tag += f" p. {m['page']}"
+                cited.append(tag)
+            cited = sorted(set(cited))
+            if cited:
+                st.caption("Sources: " + "; ".join(cited))
 
 # ---------- FOOTER ----------
 st.markdown("---")
