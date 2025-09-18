@@ -6,7 +6,116 @@ from langchain_chroma import Chroma
 from langchain_ollama import ChatOllama
 
 from pypdf import PdfReader
-import io, os
+from collections import defaultdict  
+import io, os, re, math  
+
+
+# cache BM25 per-vectorstore to avoid re-tokenizing
+_BM25_CACHE = {}  # key: id(vs) -> SimpleBM25
+
+_TOKENIZER = re.compile(r"\w+").findall
+
+def _tokenize(text: str):
+    return [t.lower() for t in _TOKENIZER(text or "")]
+
+def _doc_key(doc: Document) -> tuple:
+    md = doc.metadata or {}
+    return (
+        md.get("source", ""),
+        md.get("page", None),
+        (doc.page_content or "")[:64],  # short prefix to keep keys stable
+    )
+
+class SimpleBM25:
+    def __init__(self, docs: List[Document], k1: float = 1.5, b: float = 0.75):
+        self.k1, self.b = k1, b
+        self.docs = docs
+        self.N = len(docs)
+        self.tf = []              # list[dict[token] -> freq]
+        self.df = defaultdict(int)
+        self.doc_len = []
+        for d in docs:
+            toks = _tokenize(d.page_content)
+            counts = defaultdict(int)
+            for t in toks:
+                counts[t] += 1
+            self.tf.append(counts)
+            self.doc_len.append(sum(counts.values()))
+            for t in counts.keys():
+                self.df[t] += 1
+        self.avgdl = (sum(self.doc_len) / self.N) if self.N else 0.0
+
+    def _idf(self, t: str) -> float:
+        n = self.df.get(t, 0)
+        # slight smoothing to avoid negatives on rare corpora
+        return math.log((self.N - n + 0.5) / (n + 0.5) + 1.0)
+
+    def score(self, query: str, top_m: int = 50) -> List[tuple]:
+        if not self.docs:
+            return []
+        q_toks = _tokenize(query)
+        scores = [0.0] * self.N
+        for i, counts in enumerate(self.tf):
+            dl = self.doc_len[i] or 1
+            norm = 1 - self.b + self.b * (dl / (self.avgdl or 1))
+            s = 0.0
+            for t in q_toks:
+                f = counts.get(t, 0)
+                if not f:
+                    continue
+                idf = self._idf(t)
+                s += idf * ((f * (self.k1 + 1)) / (f + self.k1 * norm))
+            scores[i] = s
+        idxs = sorted(range(self.N), key=lambda j: scores[j], reverse=True)[:top_m]
+        return [(self.docs[j], scores[j]) for j in idxs if scores[j] > 0]
+
+def _rrf_fuse(
+    lists: List[List[tuple]],  # each: [(Document, score), ...] in rank order
+    rrf_k: int = 60,
+    top_k: int = 4,
+) -> List[tuple]:
+    acc = defaultdict(float)
+    pick = {}  # key -> Document (first seen)
+    for result_list in lists:
+        for rank, (doc, _score) in enumerate(result_list, start=1):
+            key = _doc_key(doc)
+            acc[key] += 1.0 / (rrf_k + rank)
+            if key not in pick:
+                pick[key] = doc
+    fused = sorted(acc.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
+    return [(pick[key], fused_score) for key, fused_score in fused]
+
+def _get_all_docs_from_chroma(vs) -> List[Document]:
+    """
+    Try to read the full corpus from Chroma.
+    Falls back to empty list if the backend doesn’t support a full dump.
+    """
+    try:
+        raw = vs.get(include=["documents", "metadatas", "ids"])
+    except Exception:
+        try:
+            raw = vs._collection.get(include=["documents", "metadatas", "ids"])
+        except Exception:
+            return []
+    docs = []
+    for text, meta in zip(raw.get("documents", []) or [], raw.get("metadatas", []) or []):
+        docs.append(Document(page_content=text or "", metadata=meta or {}))
+    return docs
+
+def _ensure_bm25_for_vs(vs, candidate_docs: List[Document] | None = None) -> SimpleBM25:
+    """
+    Build or return cached BM25 for this vectorstore.
+    If candidate_docs is provided, we build BM25 over that pool (fallback).
+    """
+    if candidate_docs is not None:
+        return SimpleBM25(candidate_docs)
+    key = id(vs)
+    if key in _BM25_CACHE:
+        return _BM25_CACHE[key]
+    corpus = _get_all_docs_from_chroma(vs)
+    bm25 = SimpleBM25(corpus)
+    _BM25_CACHE[key] = bm25
+    return bm25
 
 # # ---------- HELPERS (stubs) ----------
 def read_txt(file_obj: io.BytesIO) -> str:
@@ -114,27 +223,55 @@ def build_or_load_vectorstore(chunks, embedding, persist_dir: str):
     return Chroma(embedding_function=embedding, persist_directory=persist_dir)
 
 # --- retrieval ---
-def retrieve(vs, query: str, k: int, mmr_lambda: float = 0.7):
+def retrieve(
+    vs,
+    query: str,
+    k: int,
+    mmr_lambda: float = 0.7,
+    mode: str = "dense",  # NEW: "dense" | "hybrid"
+):
     """
     Return top-k relevant chunks with scores.
     Output: list of (Document, score).
+    - dense: current dense-only behavior (similarity + MMR, status quo).
+    - hybrid: BM25 + Dense fused via RRF (no extra deps).
     """
     if vs is None:
         return []
 
-    # First, get top-k via similarity with scores
-    results = vs.similarity_search_with_score(query, k=k)
+    # --- Dense path: keep your existing behavior intact ---
+    dense_fetch = max(3 * k, 20)
+    try:
+        dense_results = vs.similarity_search_with_score(query, k=dense_fetch)
+        # dense_results: List[(Document, float)]
+    except Exception:
+        dense_docs = vs.similarity_search(query, k=dense_fetch)
+        dense_results = [(d, 0.0) for d in dense_docs]
 
-    # Optionally rerank/diversify via MMR (using lambda_mult)
-    retriever = vs.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": k, "fetch_k": max(10, 3*k), "lambda_mult": mmr_lambda},
+    if mode == "dense":
+        # Preserve your MMR diversification + score mapping
+        retriever = vs.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": k, "fetch_k": max(10, 3 * k), "lambda_mult": mmr_lambda},
+        )
+        mmr_docs = retriever.get_relevant_documents(query)
+        score_map = {d.page_content: s for d, s in dense_results}
+        return [(d, score_map.get(d.page_content)) for d in mmr_docs]
+
+    # --- Hybrid path: BM25 + Dense via RRF ---
+    # Try BM25 over the full corpus; if empty, build over dense candidates
+    full_corpus = _get_all_docs_from_chroma(vs)
+    bm25_index = _ensure_bm25_for_vs(
+        vs,
+        candidate_docs=[d for (d, _s) in dense_results] if not full_corpus else None,
     )
-    mmr_docs = retriever.get_relevant_documents(query)
+    bm25_top = bm25_index.score(query, top_m=dense_fetch)  # [(Document, score)]
 
-    # Merge scores: map by content
-    score_map = {d.page_content: s for d, s in results}
-    return [(d, score_map.get(d.page_content)) for d in mmr_docs]
+    # RRF uses rank positions, so we can ignore raw score magnitudes
+    dense_ranked = [(doc, score) for (doc, score) in dense_results]
+
+    fused = _rrf_fuse([bm25_top, dense_ranked], rrf_k=60, top_k=k)
+    return fused
 
 # --- load existing store on app start ---
 def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
@@ -221,7 +358,6 @@ def build_index_from_files(
     }
 
     # Count pages and chunks per file
-    from collections import defaultdict
     page_count = defaultdict(set)
     chunk_count = defaultdict(int)
     for d in chunks:
