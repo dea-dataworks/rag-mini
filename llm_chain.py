@@ -1,11 +1,14 @@
 from typing import Optional
+from langchain_core.messages import SystemMessage, HumanMessage
+from guardrails import GUARDRAIL_SYSTEM, has_citation, FALLBACK_NO_CITATION
+
 
 def build_prompt(context: str, question: str) -> str:
     return (
-        "You are a helpful assistant. Answer ONLY from the provided context.\n"
-        "Use ALL relevant context; if multiple documents apply, combine them. Answer concisely.\n"
-        "If the answer isn't in the context, say you don't know.\n\n"
-        f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+        f"Context:\n{context}\n\n"
+        f"Question: {question}\n\n"
+        "Answer concisely. If you answer, include at least one citation like (file p.X).\n\n"
+        "Answer:"
     )
 
 def call_llm(
@@ -24,5 +27,16 @@ def call_llm(
         from langchain_ollama import ChatOllama
         llm = ChatOllama(model=model_name, temperature=temperature)
 
-    resp = llm.invoke(prompt)
-    return getattr(resp, "content", str(resp))
+    messages = [
+        SystemMessage(content=GUARDRAIL_SYSTEM),
+        HumanMessage(content=prompt),
+    ]
+    resp = llm.invoke(messages)
+    answer = getattr(resp, "content", str(resp))
+
+    # Post-answer guardrail: no citation pattern → fallback
+    if not has_citation(answer):
+        return FALLBACK_NO_CITATION
+
+    return answer
+

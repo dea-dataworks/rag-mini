@@ -174,7 +174,7 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
         docs.append(
             Document(
                 page_content=text,
-                metadata={"source": name}
+                metadata={"source": name, "page": 1}
             )
         )
     return docs, skipped

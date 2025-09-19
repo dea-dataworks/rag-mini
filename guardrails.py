@@ -20,3 +20,24 @@ def scrub_context(raw_text: str) -> tuple[str, list[str]]:
 
 def empty_or_thin_context(clean_text: str, min_chars: int = 40) -> bool:
     return len((clean_text or "").strip()) < min_chars
+
+# --- Guardrail constants & citation check ---
+
+# Short, explicit system rules for generation
+GUARDRAIL_SYSTEM = (
+    "You answer STRICTLY from the provided context. "
+    "If the context is insufficient, reply exactly: "
+    "'I don’t have enough context to answer that from the provided documents.' "
+    "When you do answer, include at least one citation in the form (file p.X). "
+    "Keep answers concise."
+)
+
+# Simple pattern: anything inside (...) that includes ' p.' and a number
+_CITE_RE = re.compile(r"\([^)]+ p\.\d+\)")
+
+def has_citation(text: str) -> bool:
+    return bool(_CITE_RE.search(text or ""))
+
+FALLBACK_NO_CITATION = (
+    "I don’t have enough context to answer that from the provided documents."
+)
