@@ -5,7 +5,9 @@ import streamlit as st
 import guardrails
 from llm_chain import build_prompt, call_llm
 from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
-                      build_index_from_files, build_citation_tags, sanitize_chunks)
+                      build_index_from_files, build_citation_tags, sanitize_chunks,
+                      make_fresh_index_dir, read_manifest)
+
 
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.1"
@@ -17,7 +19,8 @@ st.title(APP_TITLE)
 st.caption("Local, simple Retrieval-Augmented Q&A (scope-first)")
 
 # ---------- SESSION DEFAULTS ----------
-st.session_state.setdefault("PERSIST_DIR", PERSIST_DIR)
+st.session_state.setdefault("BASE_DIR", PERSIST_DIR)       # sidebar-selected base folder
+st.session_state.setdefault("ACTIVE_INDEX_DIR", None)      # specific subfolder in use (idx_YYYYMMDD_HHMMSS)
 st.session_state.setdefault("OPENAI_API_KEY", "")
 st.session_state.setdefault("LLM_PROVIDER", "ollama")
 st.session_state.setdefault("LLM_MODEL", "mistral")
@@ -35,10 +38,24 @@ if "vs" not in st.session_state:
 
 # Try to load an existing store on startup so users can retrieve without re-uploading
 if st.session_state["vs"] is None:
-    st.session_state["vs"] = load_vectorstore_if_exists(
-        embed_model= EMBED_MODEL,
-        persist_dir= st.session_state["PERSIST_DIR"],
-    )
+    from rag_core import read_active_pointer, find_latest_index_dir
+    base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
+
+    # 1) Try saved pointer for this base
+    active_dir = st.session_state.get("ACTIVE_INDEX_DIR") or read_active_pointer(base_dir)
+
+    # 2) Fallback: newest idx_* under base
+    if not active_dir:
+        active_dir = find_latest_index_dir(base_dir)
+
+    if active_dir:
+        vs0 = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=active_dir)
+        if vs0 is not None:
+            # Switch the app to the loaded index and save pointer
+            st.session_state["vs"] = vs0
+            st.session_state["ACTIVE_INDEX_DIR"] = active_dir
+            from rag_core import save_active_pointer
+            save_active_pointer(base_dir, active_dir)
 
 # ---------- SIDEBAR SETTINGS ----------
 with st.sidebar:
@@ -130,11 +147,14 @@ with st.sidebar:
         st.markdown("**Persistence (low-touch)**")
 
         suffix = st.text_input("Index name (suffix only)", value="",
-                               placeholder="e.g., demo or client-A",
-                               help="Writes to rag_store/<suffix>. Leave blank to use the default store.")
-        active_persist_dir = os.path.join(PERSIST_DIR, suffix) if suffix.strip() else PERSIST_DIR
-        st.session_state["PERSIST_DIR"] = active_persist_dir
-        st.caption(f"Active index: `{active_persist_dir}`")
+                    placeholder="e.g., demo or client-A",
+                    help="Base folder under rag_store/. Each rebuild creates a fresh subfolder.")
+        base_dir = os.path.join(PERSIST_DIR, suffix) if suffix.strip() else PERSIST_DIR
+        os.makedirs(base_dir, exist_ok=True)
+
+        # Important: sidebar only sets the BASE_DIR. The active index is set by the Build step.
+        st.session_state["BASE_DIR"] = base_dir
+        st.caption(f"Active base: `{base_dir}`")
 
     st.markdown("---")
     st.markdown("**Implementation steps**")
@@ -179,19 +199,28 @@ if build_btn:
         if rebuild_from_uploads and uploaded_files:
             # ----- REBUILD PATH (heavy) -----
             with st.spinner("Reading, chunking, and indexing…"):
+                
+                # Create a clean subfolder under the chosen base dir
+                base_dir = st.session_state["BASE_DIR"]
+                fresh_dir = make_fresh_index_dir(base_dir)
+
                 embedding = get_cached_embeddings(embed_model=EMBED_MODEL)
                 vs, stats = build_index_from_files(
                     uploaded_files=uploaded_files,
                     embed_model=embed_model,
                     chunk_size=st.session_state.get("CHUNK_SIZE", 800),
                     chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
-                    persist_dir=st.session_state["PERSIST_DIR"],
+                    persist_dir=fresh_dir,
                     embedding_obj=embedding,
                 )
 
-            st.session_state["vs"] = vs
-            st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
-            st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
+                # Switch the app to the new index (persist across reruns)
+                st.session_state["vs"] = vs
+                st.session_state["ACTIVE_INDEX_DIR"] = fresh_dir
+
+                st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
+                st.caption(f"Active index: `{fresh_dir}`")
+                st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
 
             # Guard (a): warn if no valid chunks
             if stats["num_chunks"] == 0:
@@ -230,17 +259,50 @@ if build_btn:
 
         else:
             # ----- LOAD-ONLY PATH (fast) -----
-            with st.spinner("Loading existing index…"):
-                vs = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=st.session_state["PERSIST_DIR"])
-            if vs is None:
-                st.warning("No existing index found. Enable 'Rebuild from current uploads' and provide files.")
+            from rag_core import read_active_pointer, find_latest_index_dir, save_active_pointer
+            base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
+
+            active_dir = st.session_state.get("ACTIVE_INDEX_DIR") or read_active_pointer(base_dir)
+            if not active_dir:
+                active_dir = find_latest_index_dir(base_dir)
+
+            if not active_dir:
+                st.warning("No index found for this base. Upload files and enable 'Rebuild from current uploads' to create one.")
             else:
-                st.session_state["vs"] = vs
-                st.success("Loaded existing index.")
+                with st.spinner("Loading active index…"):
+                    vs = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=active_dir)
+                if vs is None:
+                    st.warning("Couldn’t load that index. Try rebuilding from uploads.")
+                else:
+                    st.session_state["vs"] = vs
+                    st.session_state["ACTIVE_INDEX_DIR"] = active_dir
+                    save_active_pointer(base_dir, active_dir)
+                    st.success(f"Loaded active index: `{active_dir}`")
 
     except Exception as e:
         st.error(f"Index operation failed: {e}")
         st.info(f"Tip: run `ollama pull {EMBED_MODEL}` (or another embedding model) and try again.")
+
+# --- Index Inspector (pre-Q&A) ---
+st.markdown("### Index Inspector")
+active_dir = st.session_state.get("ACTIVE_INDEX_DIR")
+
+if not active_dir:
+    st.info("No active index selected yet. Rebuild from uploads to create one.", icon="ℹ️")
+else:
+    st.caption(f"Active index path: `{active_dir}`")
+    mf = read_manifest(active_dir)
+    if mf:
+        st.write(f"**Built:** {mf.get('timestamp','?')} — **Docs:** {mf.get('num_docs',0)} — **Chunks:** {mf.get('num_chunks',0)}")
+        pf = mf.get("per_file", {}) or {}
+        if pf:
+            rows = [
+                {"File": k, "Pages": v.get("pages", 0), "Chunks": v.get("chunks", 0)}
+                for k, v in sorted(pf.items(), key=lambda x: x[0].lower())
+            ]
+            st.dataframe(rows, use_container_width=True)
+    else:
+        st.info("No manifest found for the active index. Rebuild to generate one.", icon="ℹ️")
 
 # ---------- Q&A (M2) ----------
 st.subheader("2) Ask questions about your docs")
@@ -350,8 +412,6 @@ if answer_btn:
                 st.info("I don’t have enough context to answer that from your documents.")
                 st.stop()
 
-            prompt = build_prompt(context_text, question)
-
             # If scrub removed a lot, warn (Phase 3 acceptance: be explicit).
             if bad_lines:
                 st.warning("Some retrieved lines were removed for safety.")
@@ -360,13 +420,7 @@ if answer_btn:
                     for ln in bad_lines[:5]:
                         st.code(ln)
 
-            # If context is too thin, exit early with the required phrasing.
-            if guardrails.empty_or_thin_context(context_text):
-                st.info("I don’t have enough context to answer that from your documents.")
-                st.stop()
-
             prompt = build_prompt(context_text, question)
-
 
             with st.spinner("Thinking…"):
                 answer = call_llm(

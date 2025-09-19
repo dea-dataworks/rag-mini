@@ -6,8 +6,7 @@ from langchain_chroma import Chroma
 
 from pypdf import PdfReader
 from collections import defaultdict  
-import io, os, re, math  
-
+import io, os, re, math, json, time
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
 _BM25_CACHE = {}  # key: id(vs) -> SimpleBM25
@@ -393,7 +392,101 @@ def build_index_from_files(
             "pages": len(page_count[src]) if src in page_count else 1,
             "chunks": chunk_count[src],
         }
+
+    # Attach persist_dir and write a manifest next to the vectors
+    stats["persist_dir"] = persist_dir
+    write_manifest(
+        persist_dir,
+        stats,
+        params={
+            "embed_model": embed_model,
+            "chunk_size": chunk_size,
+            "chunk_overlap": chunk_overlap,
+        },
+    )
     return vs, stats
+
+
+# --- Index management (fresh dir + manifest) ---
+def make_fresh_index_dir(base_dir: str) -> str:
+    """
+    Create a new subfolder under base_dir for a clean index build.
+    Example: rag_store/demo/idx_20250919_121530
+    Also clears BM25 cache so hybrid retrieval can’t see stale corpora.
+    """
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    new_dir = os.path.join(base_dir, f"idx_{ts}")
+    os.makedirs(new_dir, exist_ok=True)
+    _BM25_CACHE.clear()
+    return new_dir
+
+def _manifest_path(persist_dir: str) -> str:
+    return os.path.join(persist_dir, "manifest.json")
+
+def write_manifest(persist_dir: str, stats: dict, params: dict | None = None):
+    payload = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "persist_dir": persist_dir,
+        "num_docs": stats.get("num_docs", 0),
+        "num_chunks": stats.get("num_chunks", 0),
+        "sources": stats.get("sources", []),
+        "per_file": stats.get("per_file", {}),
+        "params": params or {},
+    }
+    try:
+        with open(_manifest_path(persist_dir), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # non-fatal
+
+def read_manifest(persist_dir: str) -> dict | None:
+    try:
+        with open(_manifest_path(persist_dir), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+    
+# --- Active pointer (per base) & index discovery ---
+
+def _active_pointer_path(base_dir: str) -> str:
+    return os.path.join(base_dir, "_ACTIVE.json")
+
+def save_active_pointer(base_dir: str, index_dir: str) -> None:
+    """Persist the active index for this base so the app can auto-load on startup."""
+    payload = {"active_index_dir": index_dir}
+    try:
+        with open(_active_pointer_path(base_dir), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # non-fatal
+
+def read_active_pointer(base_dir: str) -> str | None:
+    """Return the saved active index dir if it exists and is a valid folder."""
+    try:
+        with open(_active_pointer_path(base_dir), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        cand = data.get("active_index_dir")
+        if cand and os.path.isdir(cand):
+            return cand
+    except Exception:
+        return None
+    return None
+
+def list_index_dirs(base_dir: str) -> list[str]:
+    """Return absolute paths to subfolders matching idx_YYYYMMDD_HHMMSS under base_dir."""
+    if not os.path.isdir(base_dir):
+        return []
+    out = []
+    for name in os.listdir(base_dir):
+        p = os.path.join(base_dir, name)
+        if os.path.isdir(p) and name.startswith("idx_"):
+            out.append(p)
+    return sorted(out)
+
+def find_latest_index_dir(base_dir: str) -> str | None:
+    """Pick the latest idx_* folder by lexicographic order (timestamped names)."""
+    idxs = list_index_dirs(base_dir)
+    return idxs[-1] if idxs else None
 
 # --- Prompt-injection scrub (retrieved text) ---
 
