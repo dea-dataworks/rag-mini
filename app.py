@@ -287,10 +287,24 @@ if preview_btn:
             rows = make_chunk_rows(norm, st.session_state.get("SNIPPET_LEN", 240))
             st.dataframe(rows, use_container_width=True)
 
+            # --- Sanitize retrieved chunks (Preview) ---
+            docs_only = [d for (d, _) in norm]
+            sanitize_stats = {"chunks_with_drops": 0, "lines_dropped": 0}
+            if st.session_state.get("SANITIZE_RETRIEVED", True):
+                docs_only, sanitize_stats = sanitize_chunks(docs_only)
+
+            # Optional badge about sanitization (Preview)
+            if sanitize_stats.get("lines_dropped", 0) > 0:
+                st.caption(
+                    f"Sanitized (preview): {sanitize_stats['lines_dropped']} line(s) "
+                    f"in {sanitize_stats['chunks_with_drops']} chunk(s)."
+                )
+
             st.markdown("### Retrieved Chunks")
-            for i, (doc, _) in enumerate(norm, start=1):
-                with st.expander(f"Chunk {i} — {doc.metadata.get('source','unknown')} p.{doc.metadata.get('page','')}"):
-                    st.write(doc.page_content)
+            for i, d in enumerate(docs_only, start=1):
+                with st.expander(f"Chunk {i} — {d.metadata.get('source','unknown')} p.{d.metadata.get('page','')}"):
+                    st.write(d.page_content)
+
 
 if answer_btn:
     if not question.strip():
