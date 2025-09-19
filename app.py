@@ -1,9 +1,11 @@
-import streamlit as st
-from rag_core import build_index_from_files
-from rag_core import load_vectorstore_if_exists
-from rag_core import retrieve, build_prompt, call_llm
-import pandas as pd
 import os
+import pandas as pd
+import streamlit as st
+
+import guardrails
+from llm_chain import build_prompt, call_llm
+from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source,make_chunk_rows, 
+                      build_index_from_files,build_citation_tags,)
 
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.1"
@@ -270,46 +272,13 @@ if preview_btn:
             st.info("No results. Try a simpler question or rebuild the index.")
         else:
             # normalize to [(doc, score)]
-            norm = []
-            for item in hits_raw:
-                if isinstance(item, tuple) and len(item) == 2:
-                    norm.append(item)
-                else:
-                    norm.append((item, None))
-
-            # Optional: filter by score threshold
+            norm = normalize_hits(hits_raw)
             if st.session_state.get("USE_SCORE_THRESH"):
-                thr = st.session_state.get("SCORE_THRESH", 0.4)
-                norm = [(d, s) for (d, s) in norm if (isinstance(s, (float, int)) and s >= thr) or s is None]
-
-            # Optional: per-source cap
+                norm = filter_by_score(norm, st.session_state.get("SCORE_THRESH", 0.4))
             if st.session_state.get("USE_SOURCE_CAP"):
-                cap = st.session_state.get("PER_SOURCE_CAP", 2)
-                counts = {}
-                kept = []
-                for d, s in norm:
-                    src = (d.metadata or {}).get("source", "unknown")
-                    counts[src] = counts.get(src, 0) + 1
-                    if counts[src] <= cap:
-                        kept.append((d, s))
-                norm = kept
-
+                norm = cap_per_source(norm, st.session_state.get("PER_SOURCE_CAP", 2))
             st.markdown("### Chunk Inspector")
-            rows = []
-            maxlen = st.session_state.get("SNIPPET_LEN", 240)
-            for i, (doc, score) in enumerate(norm, start=1):
-                meta = doc.metadata or {}
-                full = (doc.page_content or "").replace("\n", " ")
-                snippet = full[:maxlen]
-                if len(full) > maxlen:
-                    snippet += "…"
-                rows.append({
-                    "Rank": i,
-                    "Score": f"{score:.4f}" if isinstance(score, (float, int)) else "—",
-                    "File": meta.get("source", "unknown"),
-                    "Page": meta.get("page", ""),
-                    "Snippet": snippet,
-                })
+            rows = make_chunk_rows(norm, st.session_state.get("SNIPPET_LEN", 240))
             st.dataframe(rows, use_container_width=True)
 
             st.markdown("### Retrieved Chunks")
@@ -340,33 +309,38 @@ if answer_btn:
             st.info("No results. Try a simpler question or rebuild the index.")
         else:
             # normalize to [(doc, score)]
-            norm = []
-            for item in hits_raw:
-                if isinstance(item, tuple) and len(item) == 2:
-                    norm.append(item)
-                else:
-                    norm.append((item, None))
-
+            norm = normalize_hits(hits_raw)
             if st.session_state.get("USE_SCORE_THRESH"):
-                thr = st.session_state.get("SCORE_THRESH", 0.4)
-                norm = [(d, s) for (d, s) in norm if (isinstance(s, (float, int)) and s >= thr) or s is None]
-
+                norm = filter_by_score(norm, st.session_state.get("SCORE_THRESH", 0.4))
             if st.session_state.get("USE_SOURCE_CAP"):
-                cap = st.session_state.get("PER_SOURCE_CAP", 2)
-                counts = {}
-                kept = []
-                for d, s in norm:
-                    src = (d.metadata or {}).get("source", "unknown")
-                    counts[src] = counts.get(src, 0) + 1
-                    if counts[src] <= cap:
-                        kept.append((d, s))
-                norm = kept
-
-            # docs only for prompting
+                norm = cap_per_source(norm, st.session_state.get("PER_SOURCE_CAP", 2))
             docs_only = [d for (d, _) in norm]
 
-            context_text = "\n\n---\n\n".join([d.page_content for d in docs_only])
+            raw_context = "\n\n---\n\n".join(d.page_content for d in docs_only)
+            context_text, bad_lines = guardrails.scrub_context(raw_context)
+
+            # Early exit if too thin
+            if guardrails.empty_or_thin_context(context_text):
+                st.info("I don’t have enough context to answer that from your documents.")
+                st.stop()
+
             prompt = build_prompt(context_text, question)
+
+            # If scrub removed a lot, warn (Phase 3 acceptance: be explicit).
+            if bad_lines:
+                st.warning("Some retrieved lines were removed for safety.")
+                if st.session_state.get("SHOW_DEBUG"):
+                    st.caption("Scrubbed lines:")
+                    for ln in bad_lines[:5]:
+                        st.code(ln)
+
+            # If context is too thin, exit early with the required phrasing.
+            if guardrails.empty_or_thin_context(context_text):
+                st.info("I don’t have enough context to answer that from your documents.")
+                st.stop()
+
+            prompt = build_prompt(context_text, question)
+
 
             with st.spinner("Thinking…"):
                 answer = call_llm(
@@ -380,31 +354,9 @@ if answer_btn:
             st.write(answer)
 
             # --- Citations (dedup + page-anchored) ---
-            cited_pairs = []  # list of (source, page or None)
-            for d in docs_only:
-                m = d.metadata or {}
-                src = m.get("source", "unknown")
-                pg = m.get("page", None)
-                cited_pairs.append((src, pg))
-
-            # Dedup while preserving stable ordering by (source, page)
-            uniq = {}
-            for src, pg in cited_pairs:
-                key = (src, pg)
-                if key not in uniq:
-                    uniq[key] = None
-            # Sort by source name then page (None treated as 0)
-            ordered = sorted(uniq.keys(), key=lambda t: (t[0], t[1] or 0))
-
-            display_tags = []
-            for src, pg in ordered:
-                if pg:
-                    display_tags.append(f"{src} p.{pg}")
-                else:
-                    display_tags.append(src)
-
-            if display_tags:
-                st.caption("Sources: " + "; ".join(display_tags))
+            tags = build_citation_tags(docs_only)
+            if tags:
+                st.caption("Sources: " + "; ".join(tags))
 
             # --- Optional: Show cited chunks (subset used in the prompt) ---
             with st.expander("Show cited chunks", expanded=False):

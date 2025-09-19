@@ -3,7 +3,6 @@ from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
-from langchain_ollama import ChatOllama
 
 from pypdf import PdfReader
 from collections import defaultdict  
@@ -180,7 +179,6 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
         )
     return docs, skipped
 
-
 def chunk_documents(docs, size: int, overlap: int):
     """
     Split Documents into overlapping chunks.
@@ -221,6 +219,60 @@ def build_or_load_vectorstore(chunks, embedding, persist_dir: str):
         )
     # Open existing collection (no embed pass)
     return Chroma(embedding_function=embedding, persist_directory=persist_dir)
+
+# --- post-retrieval helpers (UI-agnostic) ---
+
+def normalize_hits(hits):
+    """Return list[(Document, score|None)]."""
+    out = []
+    for item in hits or []:
+        if isinstance(item, tuple) and len(item) == 2:
+            out.append(item)
+        else:
+            out.append((item, None))
+    return out
+
+def filter_by_score(pairs, threshold: float):
+    return [(d, s) for (d, s) in pairs if (isinstance(s, (float, int)) and s >= threshold) or s is None]
+
+def cap_per_source(pairs, cap: int):
+    counts, kept = {}, []
+    for d, s in pairs:
+        src = (d.metadata or {}).get("source", "unknown")
+        counts[src] = counts.get(src, 0) + 1
+        if counts[src] <= cap:
+            kept.append((d, s))
+    return kept
+
+def make_chunk_rows(pairs, snippet_len: int = 240):
+    """Rows for the Chunk Inspector table (no Streamlit calls)."""
+    rows = []
+    for i, (doc, score) in enumerate(pairs, start=1):
+        meta = doc.metadata or {}
+        full = (doc.page_content or "").replace("\n", " ")
+        snippet = full[:snippet_len] + ("…" if len(full) > snippet_len else "")
+        rows.append({
+            "Rank": i,
+            "Score": f"{score:.4f}" if isinstance(score, (float, int)) else "—",
+            "File": meta.get("source", "unknown"),
+            "Page": meta.get("page", ""),
+            "Snippet": snippet,
+        })
+    return rows
+
+def build_citation_tags(docs):
+    """Stable, de-duped `source p.X` tags for captions."""
+    cited_pairs = []
+    for d in docs:
+        m = d.metadata or {}
+        cited_pairs.append((m.get("source", "unknown"), m.get("page", None)))
+    seen = {}
+    for src, pg in cited_pairs:
+        key = (src, pg)
+        if key not in seen:
+            seen[key] = None
+    ordered = sorted(seen.keys(), key=lambda t: (t[0], t[1] or 0))
+    return [f"{src} p.{pg}" if pg else src for src, pg in ordered]
 
 # --- retrieval ---
 def retrieve(
@@ -284,37 +336,6 @@ def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
     except Exception:
         return None
     
-# --- answering ---    
-def build_prompt(context: str, question: str) -> str:
-    return (
-        "You are a helpful assistant. Answer ONLY from the provided context.\n"
-        "Use ALL relevant context; if multiple documents apply, combine them. Answer concisely.\n"
-        "If the answer isn't in the context, say you don't know.\n\n"
-        f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
-    )
-
-def call_llm(
-    prompt: str,
-    provider: str = "ollama",
-    model_name: str = "mistral",
-    openai_api_key: str | None = None,
-    temperature: float = 0.2,
-) -> str:
-    """
-    Call LLM by provider.
-    provider: "ollama" | "openai"
-    """
-    if provider == "openai":
-        if not openai_api_key:
-            raise ValueError("OpenAI key not provided.")
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(model=model_name, temperature=temperature, api_key=openai_api_key)
-    else:
-        llm = ChatOllama(model=model_name, temperature=temperature)
-
-    resp = llm.invoke(prompt)
-    return getattr(resp, "content", str(resp))
-
 # ---------- Functions ----------
 
 def build_index_from_files(
