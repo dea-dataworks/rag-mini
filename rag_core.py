@@ -302,10 +302,10 @@ def retrieve(
     if mode == "dense":
         # Preserve your MMR diversification + score mapping
         retriever = vs.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": k, "fetch_k": max(10, 3 * k), "lambda_mult": mmr_lambda},
+        search_type="mmr",
+        search_kwargs={"k": k, "fetch_k": max(10, 3 * k), "lambda_mult": mmr_lambda},
         )
-        mmr_docs = retriever.get_relevant_documents(query)
+        mmr_docs = retriever.invoke(query)  # modern API
         score_map = {d.page_content: s for d, s in dense_results}
         return [(d, score_map.get(d.page_content)) for d in mmr_docs]
 

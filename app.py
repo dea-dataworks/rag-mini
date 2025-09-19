@@ -301,9 +301,20 @@ else:
 
 # ---------- Q&A (M2) ----------
 st.subheader("2) Ask questions about your docs")
-question = st.text_input("Your question", placeholder="e.g., What are the main conclusions?")
 
-# Retrieve & Answer button
+# fire answer on Enter
+st.session_state.setdefault("TRIGGER_ANSWER", False)
+def _on_enter_answer():
+    st.session_state["TRIGGER_ANSWER"] = True
+st.text_input(
+    "Your question",
+    key="QUESTION",
+    placeholder="e.g., What are the main conclusions?",
+    on_change=_on_enter_answer
+)
+question = st.session_state.get("QUESTION", "").strip()
+
+# Retrieve & Answer button (still available)
 answer_btn = st.button("Retrieve & Answer", use_container_width=True)
 # Preview Top Sources button
 preview_btn = st.button("Preview Top Sources", use_container_width=True)
@@ -363,8 +374,10 @@ if preview_btn:
                     st.write(d.page_content)
 
 
-if answer_btn:
-    if not question.strip():
+if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
+    # reset the Enter-trigger for next time
+    st.session_state["TRIGGER_ANSWER"] = False
+    if not question:
         st.warning("Please type a question.")
     elif vs is None:
         st.error("No vector store found. Build the index first (Step 1).")
