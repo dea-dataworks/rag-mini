@@ -4,8 +4,8 @@ import streamlit as st
 
 import guardrails
 from llm_chain import build_prompt, call_llm
-from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source,make_chunk_rows, 
-                      build_index_from_files,build_citation_tags,)
+from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
+                      build_index_from_files, build_citation_tags, sanitize_chunks)
 
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.1"
@@ -108,8 +108,14 @@ with st.sidebar:
             "PER_SOURCE_CAP": int(per_source_cap),
         })
 
+        # Anti-injection sanitizer (default ON)
+        st.session_state.setdefault("SANITIZE_RETRIEVED", True)
+        st.checkbox("Sanitize retrieved text (anti-injection)", key="SANITIZE_RETRIEVED",
+                    help="Drop lines like 'ignore previous instructions', trim extreme lines, and fix stray code fences.")
+
         st.markdown("---")
         st.markdown("**UX / Display**")
+
 
         snippet_len = st.slider("Snippet length (chars)", 160, 600, 240, 10,
                                 help="UI only; does not change retrieval.")
@@ -316,8 +322,14 @@ if answer_btn:
                 norm = cap_per_source(norm, st.session_state.get("PER_SOURCE_CAP", 2))
             docs_only = [d for (d, _) in norm]
 
+            # sanitize retrieved chunks (pre-prompt)
+            sanitize_stats = {"chunks_with_drops": 0, "lines_dropped": 0}
+            if st.session_state.get("SANITIZE_RETRIEVED", True):
+                docs_only, sanitize_stats = sanitize_chunks(docs_only)
+
             raw_context = "\n\n---\n\n".join(d.page_content for d in docs_only)
             context_text, bad_lines = guardrails.scrub_context(raw_context)
+
 
             # Early exit if too thin
             if guardrails.empty_or_thin_context(context_text):
@@ -350,8 +362,13 @@ if answer_btn:
                     openai_api_key=st.session_state.get("OPENAI_API_KEY"),
                 )
 
-            st.markdown("### 🧠 Answer")
+            st.markdown("### Answer")
             st.write(answer)
+
+            # Optional badge about sanitization
+            if sanitize_stats.get("lines_dropped", 0) > 0:
+                st.caption(f"Sanitized: {sanitize_stats['lines_dropped']} line(s) in "
+                           f"{sanitize_stats['chunks_with_drops']} chunk(s).")
 
             # --- Citations (dedup + page-anchored) ---
             tags = build_citation_tags(docs_only)

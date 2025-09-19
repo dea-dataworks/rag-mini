@@ -394,3 +394,61 @@ def build_index_from_files(
             "chunks": chunk_count[src],
         }
     return vs, stats
+
+# --- Prompt-injection scrub (retrieved text) ---
+
+_SUSPECT = re.compile(
+    r"(ignore (previous|above) (instructions|directions)|"
+    r"^system:|^developer:|^assistant:|"
+    r"erase instructions|jailbreak|prompt injection)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+def scrub_injection(text: str, max_line_len: int = 2000) -> tuple[str, int]:
+    """
+    Heuristic sanitizer for a single chunk:
+      • drop lines matching _SUSPECT
+      • trim very long lines to max_line_len
+      • close a dangling code fence if present
+    Returns (clean_text, dropped_count)
+    """
+    lines = (text or "").splitlines()
+
+    dropped = 0
+    kept = []
+    for ln in lines:
+        if _SUSPECT.search(ln):
+            dropped += 1
+            continue
+        if len(ln) > max_line_len:
+            ln = ln[:max_line_len] + " …"
+        kept.append(ln)
+
+    clean = "\n".join(kept)
+    if clean.count("```") % 2 == 1:
+        clean += "\n```"  # close stray fence
+
+    return clean, dropped
+
+def sanitize_chunks(chunks):
+    """
+    Apply scrub_injection() to each retrieved Document.
+    Returns (clean_chunks, telemetry) where telemetry is:
+      {'chunks_with_drops': X, 'lines_dropped': Y}
+    """
+    clean = []
+    chunks_with_drops = 0
+    lines_dropped = 0
+
+    for ch in chunks:
+        new_text, dropped = scrub_injection(ch.page_content)
+        if dropped:
+            chunks_with_drops += 1
+            lines_dropped += dropped
+        clean.append(Document(page_content=new_text, metadata=ch.metadata))
+
+    telemetry = {
+        "chunks_with_drops": chunks_with_drops,
+        "lines_dropped": lines_dropped,
+    }
+    return clean, telemetry
