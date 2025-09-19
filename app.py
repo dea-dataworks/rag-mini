@@ -196,12 +196,19 @@ with col_b:
 
 if build_btn:
     try:
-        if rebuild_from_uploads and uploaded_files:
+        from rag_core import (
+            read_active_pointer, find_latest_index_dir, list_index_dirs, save_active_pointer
+        )
+        base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
+
+        # Decide behavior up-front for an empty base
+        base_has_any = bool(list_index_dirs(base_dir))
+
+        # Case A — Rebuild explicitly requested AND uploads present → rebuild
+        # Case B — Base is empty AND uploads present → build even if toggle is OFF (helpful default)
+        if (rebuild_from_uploads and uploaded_files) or (not base_has_any and uploaded_files):
             # ----- REBUILD PATH (heavy) -----
             with st.spinner("Reading, chunking, and indexing…"):
-                
-                # Create a clean subfolder under the chosen base dir
-                base_dir = st.session_state["BASE_DIR"]
                 fresh_dir = make_fresh_index_dir(base_dir)
 
                 embedding = get_cached_embeddings(embed_model=EMBED_MODEL)
@@ -214,9 +221,10 @@ if build_btn:
                     embedding_obj=embedding,
                 )
 
-                # Switch the app to the new index (persist across reruns)
+                # Switch the app to the new index (persist across reruns) + save pointer
                 st.session_state["vs"] = vs
                 st.session_state["ACTIVE_INDEX_DIR"] = fresh_dir
+                save_active_pointer(base_dir, fresh_dir)
 
                 st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
                 st.caption(f"Active index: `{fresh_dir}`")
@@ -231,21 +239,8 @@ if build_btn:
             if stats.get("skipped_files"):
                 st.info("Skipped files: " + ", ".join(stats["skipped_files"]))
 
-            # Per-file table (pages & chunks)
-            if stats.get("per_file"):
-                st.markdown("##### Per-file stats")
-                rows = [
-                    {"File": fname, "Pages": meta.get("pages", 0), "Chunks": meta.get("chunks", 0)}
-                    for fname, meta in stats["per_file"].items()
-                ]
-                df_pf = pd.DataFrame(rows).sort_values("File").reset_index(drop=True)
-                try:
-                    st.dataframe(df_pf, use_container_width=True, hide_index=True)
-                except TypeError:
-                    df_pf.index = [""] * len(df_pf)
-                    st.dataframe(df_pf, use_container_width=True)
 
-            # Optional timings/debug (always outside per_file block)
+            # Optional timings/debug
             if st.session_state.get("SHOW_DEBUG") and stats and isinstance(stats, dict):
                 if "timings" in stats:
                     t = stats["timings"]
@@ -259,15 +254,15 @@ if build_btn:
 
         else:
             # ----- LOAD-ONLY PATH (fast) -----
-            from rag_core import read_active_pointer, find_latest_index_dir, save_active_pointer
-            base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
-
             active_dir = st.session_state.get("ACTIVE_INDEX_DIR") or read_active_pointer(base_dir)
             if not active_dir:
                 active_dir = find_latest_index_dir(base_dir)
 
             if not active_dir:
-                st.warning("No index found for this base. Upload files and enable 'Rebuild from current uploads' to create one.")
+                if uploaded_files:
+                    st.info("No index exists yet. Turn ON 'Rebuild from current uploads' to create one.")
+                else:
+                    st.info("No index exists yet. Upload files above, then click Build.")
             else:
                 with st.spinner("Loading active index…"):
                     vs = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=active_dir)
