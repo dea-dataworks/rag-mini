@@ -620,6 +620,7 @@ def _dedup_citations(docs):
     out.sort(key=lambda r: (r["source"], r["page"] or 0))
     return out
 
+
 def build_qa_result(
     question: str,
     answer: str,
@@ -634,9 +635,14 @@ def build_qa_result(
     meta.setdefault("top_k", len(pairs) if pairs else 0)
     meta.setdefault("timestamp", time.strftime("%Y-%m-%dT%H:%M:%S"))
 
+    # Create a short gist for chat conditioning / history UIs
+    txt = (answer or "").strip()
+    gist = (txt[:200] + "…") if len(txt) > 200 else txt
+
     return {
         "question": question or "",
         "answer": answer or "",
+        "answer_gist": gist,
         "citations": _dedup_citations(docs_used),
         "chunks": _make_chunk_records(pairs or []),
         "meta": {
@@ -646,3 +652,4 @@ def build_qa_result(
             "timestamp": meta.get("timestamp"),
         },
     }
+

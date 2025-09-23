@@ -26,7 +26,9 @@ st.session_state.setdefault("ACTIVE_INDEX_DIR", None)      # specific subfolder 
 st.session_state.setdefault("OPENAI_API_KEY", "")
 st.session_state.setdefault("LLM_PROVIDER", "ollama")
 st.session_state.setdefault("LLM_MODEL", "mistral")
-
+st.session_state.setdefault("chat_history", [])   # list[dict]: prior turns
+st.session_state.setdefault("use_history", False) # UI toggle: condition LLM on prior turns
+st.session_state.setdefault("max_history_turns", 4)  # small cap to avoid token bloat
 # ---------- HELPERS ----------
 
 @st.cache_resource
@@ -161,6 +163,20 @@ with st.sidebar:
             "SNIPPET_LEN": int(snippet_len),
             "SHOW_DEBUG": bool(show_debug),
         })
+
+        st.markdown("---")
+        st.caption("Conversation")
+        st.checkbox(
+            "Use previous turns as context",
+            key="use_history",
+            help="Keeps continuity between questions. Facts still come from retrieved sources."
+        )
+        st.number_input(
+            "Turns to include",
+            min_value=1, max_value=10, step=1,
+            key="max_history_turns",
+            disabled=not st.session_state.get("use_history", False)
+        )
 
         st.markdown("---")
         st.markdown("**Persistence (low-touch)**")
@@ -312,6 +328,7 @@ else:
 
 # ---------- Q&A (M2) ----------
 st.subheader("2) Ask questions about your docs")
+st.caption("Tip: press Enter to run, or click Retrieve & Answer.")
 
 # fire answer on Enter
 st.session_state.setdefault("TRIGGER_ANSWER", False)
@@ -439,7 +456,13 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     for ln in bad_lines[:5]:
                         st.code(ln)
 
-            prompt = build_prompt(context_text, question)
+            prompt = build_prompt(
+                context_text,
+                question,
+                chat_history=st.session_state.get("chat_history", []),
+                use_history=st.session_state.get("use_history", False),
+                max_history_turns=st.session_state.get("max_history_turns", 4),
+            )
 
             with st.spinner("Thinking…"):
                 answer = call_llm(
@@ -479,6 +502,26 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             except Exception as e:
                 st.info(f"Couldn’t package the Q&A for export: {e}")
                 qa = None
+
+            # Build one history turn and append
+            try:
+                answer_text = (qa.get("answer") or "").strip()
+                gist = (answer_text[:200] + "…") if len(answer_text) > 200 else answer_text
+                history_item = {
+                    "question": qa.get("question", ""),
+                    "answer": answer_text,
+                    "answer_gist": gist,
+                    "sources": qa.get("sources", []),
+                    "created_at": (qa.get("meta", {}) or {}).get("timestamp", None),
+                }
+                st.session_state["chat_history"].append(history_item)
+
+                # Cap to last N turns
+                k = int(st.session_state.get("max_history_turns", 4)) or 4
+                if len(st.session_state["chat_history"]) > k:
+                    st.session_state["chat_history"] = st.session_state["chat_history"][-k:]
+            except Exception:
+                pass  # history is best-effort; don't block the UI
 
             # === Exports (latest turn) ===
             if qa:
@@ -545,6 +588,59 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     header = f"{src} p.{pg}" if pg else src
                     st.markdown(f"**Chunk {i} — {header}**")
                     st.write(d.page_content)
+            
+            st.markdown("### Chat (History)")
+
+            hist = st.session_state.get("chat_history", [])
+            if not hist:
+                st.info("No history yet. Ask a question to start.", icon="💬")
+            else:
+                # Show newest first, up to the configured cap
+                k = int(st.session_state.get("max_history_turns", 4)) or 4
+                turns = list(reversed(hist[-k:]))
+                for i, t in enumerate(turns, start=1):
+                    st.markdown(f"**Q{i}:** {t.get('question','')}")
+                    st.markdown(f"**A{i}:** {t.get('answer','')}")
+                    # tiny source badge line (optional)
+                    if t.get("sources"):
+                        st.caption("Sources: " + "; ".join({s.get('tag', s.get('source','src')) for s in t["sources"] if isinstance(s, dict)}))
+
+                clear_col, _ = st.columns([1, 3])
+                with clear_col:
+                    if st.button("Clear chat history"):
+                        st.session_state["chat_history"] = []
+                        st.rerun()
+
+            st.divider()
+            st.caption(
+                "Follow-up question (reuses the same retriever). "
+                + ("Using last turns for continuity." if st.session_state.get("use_history") else "History not used for answering.")
+            )
+
+            # Enter-to-run for Chat input (mirrors main Q&A)
+            st.session_state.setdefault("CHAT_TRIGGER_ANSWER", False)
+            def _on_enter_chat():
+                st.session_state["CHAT_TRIGGER_ANSWER"] = True
+
+            st.text_input(
+                "Your follow-up",
+                key="CHAT_QUESTION",
+                placeholder="Ask a follow-up…",
+                on_change=_on_enter_chat
+            )
+
+            chat_go = st.button("Follow-up: Retrieve & Answer", use_container_width=True)
+            if chat_go or st.session_state.get("CHAT_TRIGGER_ANSWER"):
+                st.session_state["CHAT_TRIGGER_ANSWER"] = False
+                q = (st.session_state.get("CHAT_QUESTION") or "").strip()
+                if not q:
+                    st.warning("Type a follow-up question first.")
+                else:
+                    # Reuse the same pipeline by setting QUESTION + trigger
+                    st.session_state["QUESTION"] = q
+                    st.session_state["TRIGGER_ANSWER"] = True
+                    st.rerun()
+
 
 # ---------- FOOTER ----------
 st.markdown("---")
