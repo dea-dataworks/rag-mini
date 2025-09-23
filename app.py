@@ -61,6 +61,43 @@ if st.session_state["vs"] is None:
             from rag_core import save_active_pointer
             save_active_pointer(base_dir, active_dir)
 
+# --- Chat export helper ---
+def _chat_to_markdown(chat_history, title="Chat Transcript"):
+    """
+    Convert st.session_state['chat_history'] into a Markdown string.
+    Each turn should be a dict with: question, answer, sources (list), and optional timestamp keys.
+    """
+    lines = [f"# {title}", ""]
+    for i, turn in enumerate(chat_history or [], 1):
+        ts = turn.get("ts") or turn.get("timestamp") or turn.get("time") or ""
+        q = (turn.get("question") or "").strip()
+        a = (turn.get("answer") or "").strip()
+        sources = turn.get("sources") or []
+
+        lines.append(f"## Turn {i}")
+        if ts:
+            lines.append(f"*Time:* {ts}")
+        lines.append("")
+        lines.append("**Q:** " + (q if q else "_(empty)_"))
+        lines.append("")
+        lines.append("**A:** " + (a if a else "_(empty)_"))
+
+        if sources:
+            lines.append("")
+            lines.append("**Sources:**")
+            for s in sources:
+                if isinstance(s, dict):
+                    ref = s.get("source") or s.get("path") or s.get("doc_id") or str(s)
+                    page = s.get("page")
+                    if page is not None:
+                        lines.append(f"- {ref} (p.{page})")
+                    else:
+                        lines.append(f"- {ref}")
+                else:
+                    lines.append(f"- {s}")
+        lines.append("")
+    return "\n".join(lines)
+
 # ---------- SIDEBAR SETTINGS ----------
 with st.sidebar:
     st.header("Settings")
@@ -166,17 +203,28 @@ with st.sidebar:
 
         st.markdown("---")
         st.caption("Conversation")
+
+        # Disable history use when there are no prior turns; also clear a stale True.
+        has_history = len(st.session_state.get("chat_history", [])) > 0
+        if not has_history and st.session_state.get("use_history", False):
+            st.session_state["use_history"] = False
+
         st.checkbox(
             "Use previous turns as context",
             key="use_history",
+            disabled=not has_history,
             help="Keeps continuity between questions. Facts still come from retrieved sources."
         )
+
         st.number_input(
             "Turns to include",
             min_value=1, max_value=10, step=1,
             key="max_history_turns",
-            disabled=not st.session_state.get("use_history", False)
+            disabled=(not st.session_state.get("use_history", False) or not has_history)
         )
+
+        if not has_history:
+            st.caption("Add at least one Q&A turn to enable history.")
 
         st.markdown("---")
         st.markdown("**Persistence (low-touch)**")
@@ -605,11 +653,31 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     if t.get("sources"):
                         st.caption("Sources: " + "; ".join({s.get('tag', s.get('source','src')) for s in t["sources"] if isinstance(s, dict)}))
 
-                clear_col, _ = st.columns([1, 3])
-                with clear_col:
+                # Tools row under Chat (History): Clear + Export
+                c1, c2 = st.columns([1, 1])
+
+                with c1:
                     if st.button("Clear chat history"):
                         st.session_state["chat_history"] = []
+                        # Also ensure history usage is off once cleared
+                        st.session_state["use_history"] = False
                         st.rerun()
+
+                with c2:
+                    has_history = len(st.session_state.get("chat_history", [])) > 0
+                    # Nice title uses the active index dir (fallback to base dir if none)
+                    idx_label = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
+                    transcript_title = f"Chat Transcript — {os.path.basename(idx_label)}"
+                    chat_md = _chat_to_markdown(st.session_state.get("chat_history", []), title=transcript_title)
+
+                    st.download_button(
+                        "Export chat (.md)",
+                        data=chat_md.encode("utf-8"),
+                        file_name="chat_transcript.md",
+                        mime="text/markdown",
+                        disabled=not has_history,
+                    )
+
 
             st.divider()
             st.caption(
