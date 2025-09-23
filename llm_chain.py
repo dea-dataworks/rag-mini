@@ -7,7 +7,8 @@ def build_prompt(context: str, question: str) -> str:
     return (
         f"Context:\n{context}\n\n"
         f"Question: {question}\n\n"
-        "Answer concisely. If you answer, include at least one citation like (file p.X).\n\n"
+        "Answer concisely. If you answer, include at least one citation.\n"
+        "Use (file p.X) for paged PDFs; use (file) for non-paged sources like TXT/DOCX.\n\n"
         "Answer:"
     )
 

@@ -5,6 +5,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 
 from pypdf import PdfReader
+from docx import Document as DocxDocument
 from collections import defaultdict  
 import io, os, re, math, json, time
 
@@ -135,11 +136,23 @@ def read_pdf_pages(file_obj: io.BytesIO, name: str):
             if text.strip():
                 out.append(Document(
                     page_content=text,
-                    metadata={"source": name, "page": i + 1}
+                    metadata={"source": name, "page": i + 1, "ext": "pdf"}
                 ))
         return out
     except Exception:
         return []
+
+def read_docx(file_obj: io.BytesIO) -> str:
+    """Extract text from a .docx by joining non-empty paragraphs."""
+    try:
+        file_obj.seek(0)
+        buf = file_obj.read()
+        doc = DocxDocument(io.BytesIO(buf))
+        paras = [p.text.strip() for p in doc.paragraphs if p.text and p.text.strip()]
+        return "\n".join(paras)
+    except Exception:
+        return ""   
+
 
 def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
     """Turn Streamlit UploadedFile objects into LangChain Documents.
@@ -154,6 +167,8 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
 
         if ext == ".txt":
             text = read_txt(uf)
+        elif ext == ".docx":
+            text = read_docx(uf)
         elif ext == ".pdf":
             pdf_docs = read_pdf_pages(uf, name)
             if pdf_docs:
@@ -170,12 +185,19 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
             skipped.append(f"{name} — no extractable text (empty or parse error)")
             continue  # skip empty files
 
-        docs.append(
-            Document(
-                page_content=text,
-                metadata={"source": name, "page": 1}
-            )
-        )
+        # For .txt keep page=1 (legacy), for .docx omit page markers
+        meta = {"source": name}
+        if ext == ".txt":
+            meta.update({"page": 1, "ext": "txt"})
+        elif ext == ".docx":
+            meta.update({"ext": "docx"})
+        else:
+            # Fallback: keep at least source
+            meta.update({"ext": ext.lstrip(".")})
+
+        docs.append(Document(page_content=text, metadata=meta))
+
+
     return docs, skipped
 
 def chunk_documents(docs, size: int, overlap: int):

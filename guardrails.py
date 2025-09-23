@@ -28,12 +28,18 @@ GUARDRAIL_SYSTEM = (
     "You answer STRICTLY from the provided context. "
     "If the context is insufficient, reply exactly: "
     "'I don’t have enough context to answer that from the provided documents.' "
-    "When you do answer, include at least one citation in the form (file p.X). "
+    "When you do answer, include at least one citation. "
+    "Use (file p.X) for paged sources like PDFs; use (file) for non-paged sources like TXT/DOCX. "
     "Keep answers concise."
 )
 
-# Simple pattern: anything inside (...) that includes ' p.' and a number
-_CITE_RE = re.compile(r"\([^)]+ p\.\d+\)")
+# Accept a filename with extension in parentheses, with an optional ' p.X' suffix.
+# Examples that match:
+#   (paper.pdf p.3)   (notes.txt)   (report.docx)   (my file.pdf p.12)
+_CITE_RE = re.compile(
+    r"\((?:[^)]+\.(?:pdf|txt|docx))(?:\s+p\.\d+)?\)",
+    re.IGNORECASE,
+)
 
 def has_citation(text: str) -> bool:
     return bool(_CITE_RE.search(text or ""))

@@ -10,7 +10,7 @@ from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filt
 
 
 # ---------- CONFIG ----------
-APP_TITLE = "🔎 RAG Mini v0.1"
+APP_TITLE = "🔎 RAG Mini v0.2"
 PERSIST_DIR = "rag_store"  
 EMBED_MODEL = "nomic-embed-text"
 
@@ -59,7 +59,7 @@ if st.session_state["vs"] is None:
 
 # ---------- SIDEBAR SETTINGS ----------
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("Settings")
 
     # --- Regular (simple) controls ---
     embed_model   = EMBED_MODEL  # keep embeddings local (Ollama) in v0.2
@@ -67,16 +67,33 @@ with st.sidebar:
     chunk_overlap = st.number_input("Chunk overlap", 0, 1000, 120, 10)
     top_k         = st.slider("Top-k retrieval", 1, 10, 4)
 
-    # Persist basic controls
+        # Persist basic controls
     st.session_state.update({
         "CHUNK_SIZE": int(chunk_size),
         "CHUNK_OVERLAP": int(chunk_overlap),
         "TOP_K": int(top_k),
     })
 
+    # ---- Instructions (collapsible, above Advanced) ----
+    with st.expander("Instructions", expanded=False):
+        st.markdown(
+        """
+1. **Upload docs** in the main area (`.pdf` / `.txt`).
+2. **Build / Load Index**  
+   - Turn **Rebuild from current uploads** ON → creates a fresh index.  
+   - Leave it OFF → loads the last active index for the selected base folder.
+3. **Ask & Cite**  
+   - Type your question and press **Enter** (or click **Retrieve & Answer**).  
+   - Use **Preview Top Sources** to inspect retrieved chunks.
+ - **Advanced:**  
+   - The app auto-loads your last active index next session.
+   - Optional: Set **Index name (suffix)** to keep separate bases (e.g., `client-a`).  
+           """
+    )
+
     # --- Advanced (foldable) ---
     with st.expander("Advanced", expanded=False):
-        st.markdown("**Provider (hidden by default)**")
+        st.markdown("**Provider**")
 
         use_openai = st.checkbox("Use OpenAI (cloud)", value=False,
                                  help="Default stays local with Ollama/mistral.")
@@ -156,18 +173,14 @@ with st.sidebar:
         st.session_state["BASE_DIR"] = base_dir
         st.caption(f"Active base: `{base_dir}`")
 
-    st.markdown("---")
-    st.markdown("**Implementation steps**")
-    st.caption("1) Ingest → chunk → index\n2) Retrieve → answer → cite\n3) UI polish + docs")
-
 # ---------- FILE UPLOAD ----------
 # create a resettable key so we can clear the uploader after a build
 if "UPLOAD_KEY" not in st.session_state:
     st.session_state["UPLOAD_KEY"] = 0
 
 uploaded_files = st.file_uploader(
-    "Upload .pdf or .txt",
-    type=["pdf", "txt"],
+    "Upload .pdf, .txt, or .docx",
+    type=["pdf", "txt", "docx"],
     accept_multiple_files=True,
     key=f"uploader_{st.session_state['UPLOAD_KEY']}",
 )
@@ -188,11 +201,7 @@ rebuild_from_uploads = st.checkbox(
     help="If OFF, this will just load an existing index (fast). Turn ON to re-index the files above."
 )
 
-col_a, col_b = st.columns([2, 1])
-with col_a:
-    build_btn = st.button("Build / Load Index", type="primary", use_container_width=True)
-with col_b:
-    st.info("Step 1: Build the index before asking questions.", icon="ℹ️")
+build_btn = st.button("Build / Load Index", type="primary", use_container_width=True)
 
 if build_btn:
     try:

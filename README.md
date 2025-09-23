@@ -1,13 +1,13 @@
-# RAG Mini v0.1 
+# RAG Mini v0.2 
 
 A tiny, local Retrieval-Augmented Generation app (Streamlit + LangChain + Chroma + Ollama).  
 
-## Scope (v0.1) 
+## Scope (v0.2) 
 Single‑turn Q&A over .txt/text‑PDFs, local only, no API keys.
 Not included: OCR/scanned PDFs, multi‑turn chat, web search.
 Models: Ollama mistral for answers, nomic-embed-text for embeddings.
 
-## v0.1 Steps
+## v0.2 Steps
 - Upload `.pdf` / `.txt`
 - Chunk → Embed (Ollama) → Index (Chroma)
 - Retrieve top‑k and answer with sources
