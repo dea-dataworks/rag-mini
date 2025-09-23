@@ -9,7 +9,9 @@ from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filt
                       make_fresh_index_dir, read_manifest)
 
 from exports import to_markdown, to_csv_bytes, to_excel_bytes
-
+from index_admin import (
+    list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
+)
 
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.2"
@@ -371,6 +373,54 @@ else:
                 for k, v in sorted(pf.items(), key=lambda x: x[0].lower())
             ]
             st.dataframe(rows, use_container_width=True)
+
+        # --- Manage files in this index ---
+        st.markdown("#### Manage files in index")
+        vs = st.session_state.get("vs")
+        if vs is None:
+            st.info("Load or build the index to manage files.", icon="ℹ️")
+        else:
+            sources_in_index = list_sources_in_vs(vs)
+            if not sources_in_index:
+                st.info("No files currently in this index.", icon="ℹ️")
+            else:
+                sel = st.selectbox("Select a file", sources_in_index)
+
+                c1, c2 = st.columns(2)
+
+                with c1:
+                    if st.button("Delete from index", disabled=not bool(sel)):
+                        ok = delete_source(vs, sel)
+                        mf_params = (mf.get("params") or {}) if mf else {}
+                        rebuild_manifest_from_vs(active_dir, vs, params=mf_params)
+                        if ok:
+                            st.success(f"Removed '{sel}' from the index.")
+                        else:
+                            st.warning(f"Couldn’t remove '{sel}'.")
+                        st.rerun()
+
+                with c2:
+                    # Replacement requires an uploaded file with the same name
+                    matching = None
+                    for uf in (uploaded_files or []):
+                        if uf.name == sel:
+                            matching = uf
+                            break
+                    if st.button("Replace from uploads", disabled=not bool(sel)):
+                        if not matching:
+                            st.warning("No matching uploaded file found. Upload with the same name first.")
+                        else:
+                            del_ok, added = add_or_replace_file(
+                                vs, matching,
+                                embed_model=EMBED_MODEL,
+                                chunk_size=st.session_state.get("CHUNK_SIZE", 800),
+                                chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
+                            )
+                            mf_params = (mf.get("params") or {}) if mf else {}
+                            rebuild_manifest_from_vs(active_dir, vs, params=mf_params)
+                            st.success(f"Replaced '{sel}' — added {added} fresh chunk(s).")
+                            st.rerun()
+
     else:
         st.info("No manifest found for the active index. Rebuild to generate one.", icon="ℹ️")
 

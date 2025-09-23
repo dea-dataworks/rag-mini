@@ -101,6 +101,7 @@ def _get_all_docs_from_chroma(vs) -> List[Document]:
         docs.append(Document(page_content=text or "", metadata=meta or {}))
     return docs
 
+
 def _ensure_bm25_for_vs(vs, candidate_docs: List[Document] | None = None) -> SimpleBM25:
     """
     Build or return cached BM25 for this vectorstore.
