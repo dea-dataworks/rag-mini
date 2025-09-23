@@ -5,8 +5,10 @@ import streamlit as st
 import guardrails
 from llm_chain import build_prompt, call_llm
 from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
-                      build_index_from_files, build_citation_tags, sanitize_chunks,
+                      build_index_from_files, build_citation_tags, sanitize_chunks, build_qa_result,
                       make_fresh_index_dir, read_manifest)
+
+from exports import to_markdown, to_csv_bytes, to_excel_bytes
 
 
 # ---------- CONFIG ----------
@@ -459,6 +461,79 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             tags = build_citation_tags(docs_only)
             if tags:
                 st.caption("Sources: " + "; ".join(tags))
+
+            # === Build QA payload (for exports/history) ===
+            try:
+                qa = build_qa_result(
+                    question=question,
+                    answer=answer,
+                    docs_used=docs_only,        # sanitized docs actually sent to the LLM
+                    pairs=norm,                 # normalized [(Document, score)] used for ranking
+                    meta={
+                        "model": st.session_state.get("LLM_MODEL"),
+                        "top_k": st.session_state.get("TOP_K", top_k),
+                        "retrieval_mode": st.session_state.get("RETRIEVE_MODE"),
+                    },
+                )
+                st.session_state["last_qa"] = qa
+            except Exception as e:
+                st.info(f"Couldn’t package the Q&A for export: {e}")
+                qa = None
+
+            # === Exports (latest turn) ===
+            if qa:
+                st.markdown("#### Exports")
+                ts = (qa.get("meta", {}) or {}).get("timestamp", "")
+                safe_ts = ts.replace(":", "-") if ts else ""
+                base_name = f"qa_{safe_ts}" if safe_ts else "qa_latest"
+
+                # Precompute payloads
+                try:
+                    md_payload = to_markdown(qa)
+                except Exception as e:
+                    md_payload = f"Q&A Export failed to render markdown: {e}"
+
+                try:
+                    csv_payload = to_csv_bytes(qa)
+                except Exception as e:
+                    csv_payload = f"CSV export failed: {e}".encode("utf-8")
+
+                # Excel may be unavailable if pandas/openpyxl not installed
+                excel_ok = True
+                try:
+                    xlsx_payload = to_excel_bytes(qa)
+                except Exception as e:
+                    excel_ok = False
+                    xlsx_err = str(e)
+
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.download_button(
+                        "Download Markdown",
+                        data=md_payload,
+                        file_name=f"{base_name}.md",
+                        mime="text/markdown",
+                        use_container_width=True,
+                    )
+                with c2:
+                    st.download_button(
+                        "Download CSV",
+                        data=csv_payload,
+                        file_name=f"{base_name}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                with c3:
+                    if excel_ok:
+                        st.download_button(
+                            "Download Excel",
+                            data=xlsx_payload,
+                            file_name=f"{base_name}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+                    else:
+                        st.info(f"Excel export unavailable: {xlsx_err}")
 
             # --- Optional: Show cited chunks (subset used in the prompt) ---
             with st.expander("Show cited chunks", expanded=False):

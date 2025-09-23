@@ -584,3 +584,65 @@ def enforce_citation(answer: str, fallback: str) -> str:
         return txt
     return fallback
 
+# === EXPORT PAYLOAD HELPERS ===
+
+def _make_chunk_records(pairs, snippet_len: int = 300):
+    """
+    Convert normalized retrieval pairs into export-friendly dicts.
+    Each has: rank, score, source, page, chunk_id (if any), snippet.
+    """
+    rows = []
+    for i, (doc, score) in enumerate(pairs, start=1):
+        meta = doc.metadata or {}
+        full = (doc.page_content or "").replace("\n", " ")
+        snippet = full[:snippet_len] + ("…" if len(full) > snippet_len else "")
+        rows.append({
+            "rank": i,
+            "score": float(score) if isinstance(score, (float, int)) else None,
+            "source": meta.get("source", "unknown"),
+            "page": meta.get("page", None),
+            "chunk_id": meta.get("id") or meta.get("chunk_id"),
+            "snippet": snippet,
+        })
+    return rows
+
+def _dedup_citations(docs):
+    """Return unique [{'source': ..., 'page': ...}] in stable order."""
+    seen = set()
+    out = []
+    for d in docs or []:
+        m = d.metadata or {}
+        key = (m.get("source", "unknown"), m.get("page", None))
+        if key not in seen:
+            seen.add(key)
+            out.append({"source": key[0], "page": key[1]})
+    # sort for stability (by source, then page if present)
+    out.sort(key=lambda r: (r["source"], r["page"] or 0))
+    return out
+
+def build_qa_result(
+    question: str,
+    answer: str,
+    docs_used: list,            # list[Document] actually sent to the LLM (post-sanitize)
+    pairs: list,                # list[(Document, score)] used for ranking/export
+    meta: dict | None = None,   # e.g., {'model': 'mistral', 'top_k': 4, 'retrieval_mode': 'dense'}
+) -> dict:
+    """
+    Package a single QA turn into a consistent dict for UI storage and export.
+    """
+    meta = dict(meta or {})
+    meta.setdefault("top_k", len(pairs) if pairs else 0)
+    meta.setdefault("timestamp", time.strftime("%Y-%m-%dT%H:%M:%S"))
+
+    return {
+        "question": question or "",
+        "answer": answer or "",
+        "citations": _dedup_citations(docs_used),
+        "chunks": _make_chunk_records(pairs or []),
+        "meta": {
+            "model": meta.get("model"),
+            "top_k": int(meta.get("top_k", 0)),
+            "retrieval_mode": meta.get("retrieval_mode"),
+            "timestamp": meta.get("timestamp"),
+        },
+    }
