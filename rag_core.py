@@ -327,38 +327,37 @@ def retrieve(
     query: str,
     k: int,
     mmr_lambda: float = 0.7,
-    mode: str = "dense",  # NEW: "dense" | "hybrid"
+    mode: str = "dense",  # "dense" | "hybrid" | "bm25"  (NEW)
 ):
     """
     Return top-k relevant chunks with scores.
     Output: list of (Document, score).
-    - dense: current dense-only behavior (similarity + MMR, status quo).
-    - hybrid: BM25 + Dense fused via RRF (no extra deps).
+    - dense: similarity + MMR (status quo).
+    - hybrid: BM25 + Dense fused via RRF.
+    - bm25: sparse-only over the corpus (NEW).
     """
     if vs is None:
         return []
 
-    # --- Dense path: keep your existing behavior intact ---
     dense_fetch = max(3 * k, 20)
+    # Try to get dense results (also used to seed BM25 if corpus dump is unavailable)
     try:
         dense_results = vs.similarity_search_with_score(query, k=dense_fetch)
-        # dense_results: List[(Document, float)]
     except Exception:
         dense_docs = vs.similarity_search(query, k=dense_fetch)
         dense_results = [(d, 0.0) for d in dense_docs]
 
+    # --- Dense path (unchanged) ---
     if mode == "dense":
-        # Preserve your MMR diversification + score mapping
         retriever = vs.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": k, "fetch_k": max(10, 3 * k), "lambda_mult": mmr_lambda},
+            search_type="mmr",
+            search_kwargs={"k": k, "fetch_k": max(10, 3 * k), "lambda_mult": mmr_lambda},
         )
-        mmr_docs = retriever.invoke(query)  # modern API
+        mmr_docs = retriever.invoke(query)
         score_map = {d.page_content: s for d, s in dense_results}
         return [(d, score_map.get(d.page_content)) for d in mmr_docs]
 
-    # --- Hybrid path: BM25 + Dense via RRF ---
-    # Try BM25 over the full corpus; if empty, build over dense candidates
+    # Get BM25 index over entire corpus or over dense candidates as a fallback
     full_corpus = _get_all_docs_from_chroma(vs)
     bm25_index = _ensure_bm25_for_vs(
         vs,
@@ -366,9 +365,12 @@ def retrieve(
     )
     bm25_top = bm25_index.score(query, top_m=dense_fetch)  # [(Document, score)]
 
-    # RRF uses rank positions, so we can ignore raw score magnitudes
-    dense_ranked = [(doc, score) for (doc, score) in dense_results]
+    # --- BM25-only path (NEW) ---
+    if mode == "bm25":
+        return bm25_top[:k]
 
+    # --- Hybrid path (unchanged): fuse BM25 + Dense via RRF ---
+    dense_ranked = [(doc, score) for (doc, score) in dense_results]
     fused = _rrf_fuse([bm25_top, dense_ranked], rrf_k=60, top_k=k)
     return fused
 

@@ -1,12 +1,6 @@
-{"question": "What does the preamble of the UDHR emphasize about dignity and freedom?", "must_include_sources": ["udhr.pdf p.1"]}
-{"question": "According to Article 1, how are all human beings described?", "must_include_sources": ["udhr.pdf p.1"]}
-{"question": "Which kinds of distinctions are prohibited under Article 2?", "must_include_sources": ["udhr.pdf p.1"]}
-{"question": "What rights are guaranteed by Article 3?", "must_include_sources": ["udhr.pdf p.1"]}
-{"question": "Which practices are banned in Article 4?", "must_include_sources": ["udhr.pdf p.1"]}
-{"question": "What does Article 5 say about torture and treatment?", "must_include_sources": ["udhr.pdf p.1"]}
-{"question": "What legal principle is affirmed in Article 6?", "must_include_sources": ["udhr.pdf p.2"]}
-{"question": "According to Article 7, what kind of equality is guaranteed?", "must_include_sources": ["udhr.pdf p.2"]}
-{"question": "What rights are covered in Article 10 about trials?", "must_include_sources": ["udhr.pdf p.2"]}
-{"question": "What does Article 13 guarantee about movement?", "must_include_sources": ["udhr.pdf p.3"]}
-{"question": "Which rights about marriage and family are described in Article 16?", "must_include_sources": ["udhr.pdf p.4"]}
-{"question": "What does Article 23 say about work and equal pay?", "must_include_sources": ["udhr.pdf p.6"]}
+{"question":"When was the Universal Declaration of Human Rights adopted?","answer":"10 December 1948","source":"udhr.pdf","page":1}
+{"question":"According to Article 1, what are all human beings born with?","answer":"freedom and equality in dignity and rights","source":"udhr.pdf","page":1}
+{"question":"Which article prohibits slavery and the slave trade?","answer":"Article 4","source":"udhr.pdf","page":2}
+{"question":"Which article protects freedom of thought, conscience and religion?","answer":"Article 18","source":"udhr.pdf","page":5}
+{"question":"Which article guarantees the right to education?","answer":"Article 26","source":"udhr.pdf","page":7}
+

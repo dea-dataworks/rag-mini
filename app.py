@@ -13,7 +13,7 @@ from index_admin import (
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
 from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
                     render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer)
-from eval.quick_eval import run_quick_eval  
+from eval.run_eval import run_eval_snapshot
 from exports import chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
 
@@ -784,36 +784,56 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     st.session_state["TRIGGER_ANSWER"] = True
                     st.rerun()
 
-# ---------- QUICK EVAL (DEV) ----------
-with st.expander("🔎 Quick Eval (dev)"):
-    st.caption("Baseline k-NN vs Hybrid (BM25+Dense) using eval/qa.jsonl against the current index.")
-    qpath = st.text_input("Questions file", value="eval/qa.jsonl")
-    k_eval = st.number_input("k", min_value=1, max_value=10, value=int(st.session_state.get("TOP_K", 4)))
-    mmr_lambda = st.slider("MMR λ (hybrid)", 0.0, 1.0, float(st.session_state.get("MMR_LAMBDA", 0.7)), 0.05)
+# ---------- EVAL SNAPSHOT (Retrieval-only) ----------
+with st.expander("Eval — retrieval snapshot (hit@k & MRR)", expanded=False):
+    st.caption("Runs on eval/qa.jsonl (retrieval-only; no LLM). Matches filename + page (if given).")
 
-    if st.button("Run quick eval"):
-        
-        persist_dir = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
-        df, summary = run_quick_eval(
-            qpath=qpath,
-            k_eval=int(k_eval),
-            mmr_lambda=float(mmr_lambda),
-            embed_model=EMBED_MODEL,
-            persist_dir=persist_dir,
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        k_eval = st.slider("k (top docs)", 1, 20, int(st.session_state.get("TOP_K", 4)), 1)
+    with c2:
+        modes = st.multiselect(
+            "Retrievers",
+            options=["BM25", "Hybrid", "Dense"],
+            default=["BM25", "Hybrid", "Dense"],
+            help="Compare multiple retrievers side-by-side",
         )
-        if df.empty:
-            st.warning(summary.get("msg", "No results or no questions found."))
-        else:
-            st.dataframe(df, height=260, use_container_width=True)
-            st.write(f"**hit@{summary['k']}** — baseline: {summary['mean_baseline_hit']:.3f} | hybrid: {summary['mean_hybrid_hit']:.3f}")
-            st.write(f"**MRR** — baseline: {summary['mean_baseline_mrr']:.3f} | hybrid: {summary['mean_hybrid_mrr']:.3f}")
-            st.write(f"**Improved MRR:** {summary['improved_mrr_count']}/{summary['total']} queries")
-            st.download_button(
-                "Download results (.csv)",
-                data=df.to_csv(index=False).encode("utf-8"),
-                file_name="eval_results.csv",
-                mime="text/csv",
+    with c3:
+        qpath = st.text_input("Questions file", value="eval/qa.jsonl")
+
+    run_eval = st.button("Run eval", type="primary", use_container_width=True)
+
+    if run_eval:
+        persist_dir = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
+        mode_tokens = [m.lower() for m in modes]
+
+        with st.spinner("Evaluating…"):
+            summary_df, details_by_mode = run_eval_snapshot(
+                qa_path=qpath,
+                persist_dir=persist_dir,
+                embed_model=EMBED_MODEL,
+                modes=mode_tokens,
+                k=int(k_eval),
             )
+
+        if summary_df.empty:
+            st.warning("No results. Check that an index is loaded and eval/qa.jsonl has data.")
+        else:
+            st.subheader("Metrics")
+            st.write(summary_df.style.format({"hit@k": "{:.2f}", "mrr": "{:.3f}"}))
+
+            st.subheader("MRR by retriever")
+            st.bar_chart(summary_df["mrr"])
+
+            with st.expander("Per-question details", expanded=False):
+                for mode, df in details_by_mode.items():
+                    st.markdown(f"**{mode.upper()}**")
+                    st.dataframe(
+                        df[["question", "gold_source", "gold_page", "rank", "hit", "mrr"]],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    st.divider()
 
 # ---------- FOOTER ----------
 st.markdown("---")
