@@ -4,8 +4,9 @@ import streamlit as st
 import guardrails
 from llm_chain import build_prompt, call_llm
 from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
-                      build_index_from_files, build_citation_tags, sanitize_chunks, build_qa_result,
+                      build_index_from_files, build_citation_tags, build_qa_result,
                       make_fresh_index_dir, read_manifest)
+from guardrails import sanitize_chunks
 from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
 )
