@@ -106,3 +106,28 @@ def sanitize_chunks(chunks):
         "lines_dropped": lines_dropped,
     }
     return clean, telemetry
+
+def guard_export_settings(run_settings: dict) -> dict:
+    """
+    Extra safety check for exporting run_settings.
+    Keeps only whitelisted keys and redacts sensitive ones.
+    """
+    if not run_settings:
+        return {}
+
+    # Explicit allow-list of the fields we expect
+    allowed = {
+        "model", "provider", "top_k", "retrieval_mode",
+        "chunk_size", "chunk_overlap", "mmr_lambda",
+        "use_history", "max_history_turns",
+    }
+
+    safe = {}
+    for k, v in run_settings.items():
+        kl = str(k).lower()
+        if k in allowed:
+            safe[k] = v
+        elif any(term in kl for term in ["key", "token", "secret"]):
+            safe[k] = "[REDACTED]"
+        # ignore anything unexpected
+    return safe

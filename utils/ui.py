@@ -1,7 +1,8 @@
+import os
 import uuid
 import streamlit.components.v1 as components
 import streamlit as st
-from exports import to_markdown, to_csv_bytes, to_excel_bytes
+from exports import to_markdown, to_csv_bytes, to_excel_bytes, chat_to_markdown
 
 def render_copy_button(label: str, text: str, key: str | None = None):
     _key = key or str(uuid.uuid4()).replace("-", "")
@@ -187,3 +188,16 @@ def render_dev_metrics(qa: dict):
         ]
         if vals:
             st.bar_chart(vals, use_container_width=True, height=120)
+
+def render_session_export(chat_history, idx_label: str):
+    """Render a download button for the full chat transcript with provenance."""
+    if not chat_history:
+        return
+    transcript_title = f"Chat Transcript — {os.path.basename(idx_label)}"
+    chat_md = chat_to_markdown(chat_history, title=transcript_title)
+    st.download_button(
+        "Export full session (.md)",
+        data=chat_md.encode("utf-8"),
+        file_name="chat_transcript.md",
+        mime="text/markdown",
+    )

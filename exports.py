@@ -1,6 +1,7 @@
 from __future__ import annotations
 import io
 from typing import List, Dict
+from guardrails import guard_export_settings
 
 try:
     import pandas as pd
@@ -122,21 +123,29 @@ def to_excel_bytes(qa: Dict) -> bytes:
     return out.getvalue()
 
 # --- Chat export helper ---
-def _chat_to_markdown(chat_history, title="Chat Transcript"):
+def chat_to_markdown(chat_history, title="Chat Transcript"):
     """
     Convert st.session_state['chat_history'] into a Markdown string.
-    Each turn should be a dict with: question, answer, sources (list), and optional timestamp keys.
+    Each turn includes Q, A, sources, and run_settings (provenance).
     """
     lines = [f"# {title}", ""]
     for i, turn in enumerate(chat_history or [], 1):
-        ts = turn.get("ts") or turn.get("timestamp") or turn.get("time") or ""
+        ts = turn.get("ts") or turn.get("timestamp") or turn.get("time") or turn.get("created_at") or ""
         q = (turn.get("question") or "").strip()
         a = (turn.get("answer") or "").strip()
         sources = turn.get("sources") or []
+        run_settings = guard_export_settings(turn.get("run_settings") or {})
 
         lines.append(f"## Turn {i}")
         if ts:
             lines.append(f"*Time:* {ts}")
+
+        if run_settings:
+            lines.append("")
+            lines.append("**Run settings:**")
+            for k, v in run_settings.items():
+                lines.append(f"- {k}: {v}")
+
         lines.append("")
         lines.append("**Q:** " + (q if q else "_(empty)_"))
         lines.append("")

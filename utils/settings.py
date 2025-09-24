@@ -50,3 +50,35 @@ def apply_persisted_defaults(st):
     st.session_state.setdefault("SANITIZE_RETRIEVED", bool(_lc.get("sanitize", True)))
     st.session_state.setdefault("SHOW_DEBUG", bool(_lc.get("debug", False)))
 
+# --- Provenance / export config ---
+
+# Keys we explicitly consider part of run_settings provenance.
+EXPORTABLE_SETTINGS = [
+    "model",
+    "provider",
+    "top_k",
+    "retrieval_mode",
+    "chunk_size",
+    "chunk_overlap",
+    "mmr_lambda",
+    "use_history",
+    "max_history_turns",
+]
+
+def get_exportable_settings(session_state) -> dict:
+    """
+    Snapshot the current Streamlit session_state into a clean provenance dict.
+    Uses the EXPORTABLE_SETTINGS allow-list and maps to human-friendly keys.
+    """
+    mapping = {
+        "model": session_state.get("LLM_MODEL"),
+        "provider": session_state.get("LLM_PROVIDER"),
+        "top_k": session_state.get("TOP_K"),
+        "retrieval_mode": session_state.get("RETRIEVE_MODE"),
+        "chunk_size": session_state.get("CHUNK_SIZE"),
+        "chunk_overlap": session_state.get("CHUNK_OVERLAP"),
+        "mmr_lambda": session_state.get("MMR_LAMBDA"),
+        "use_history": session_state.get("use_history"),
+        "max_history_turns": session_state.get("max_history_turns"),
+    }
+    return mapping

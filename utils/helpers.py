@@ -37,3 +37,19 @@ def compute_score_stats(pairs):
         "min": round(scores[0], 4),
         "max": round(scores[-1], 4),
     }
+
+def sanitize_run_settings(run_settings: dict) -> dict:
+    """
+    Return a shallow copy of run_settings with sensitive keys redacted.
+    Redacts any key name containing 'key', 'token', or 'secret' (case-insensitive).
+    """
+    if not run_settings:
+        return {}
+    safe = {}
+    for k, v in run_settings.items():
+        kl = str(k).lower()
+        if any(term in kl for term in ["key", "token", "secret"]):
+            safe[k] = "[REDACTED]"
+        else:
+            safe[k] = v
+    return safe

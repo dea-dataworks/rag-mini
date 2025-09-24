@@ -14,7 +14,7 @@ from index_admin import (
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
 from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
                     render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
-                    render_dev_metrics)
+                    render_dev_metrics, render_session_export, get_exportable_settings)
 from eval.run_eval import run_eval_snapshot
 from exports import chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
@@ -731,6 +731,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     "answer_gist": gist,
                     "sources": qa.get("sources", []),
                     "created_at": (qa.get("meta", {}) or {}).get("timestamp", None),
+                    "run_settings": get_exportable_settings(st.session_state),
                 }
                 st.session_state["chat_history"].append(history_item)
 
@@ -741,10 +742,13 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             except Exception:
                 pass  # history is best-effort; don't block the UI
 
-            # === Exports (latest turn) ===
+            # === Exports (latest turn + full session) ===
             if qa:
                 st.markdown("#### Exports")
                 render_export_buttons(qa)
+
+                idx_label = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
+                render_session_export(st.session_state.get("chat_history", []), idx_label)
 
             # --- Optional: Show cited chunks (subset used in the prompt) ---
             render_cited_chunks_expander(docs_only, snippet_len=240)
