@@ -274,7 +274,7 @@ with clear_col:
 rebuild_from_uploads = st.checkbox(
     "Rebuild from current uploads",
     value=False,
-    help="If OFF, this will just load an existing index (fast). Turn ON to re-index the files above."
+    help="ON = create a fresh index in a new folder and re-index the current uploads (previous indices are kept). OFF = load the last active index (fast)."
 )
 
 build_btn = st.button("Build / Load Index", type="primary", use_container_width=True)
