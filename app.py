@@ -12,6 +12,7 @@ from index_admin import (
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
 from utils.ui import render_copy_button, sidebar_pipeline_diagram, render_export_buttons, render_copy_row 
 from eval.quick_eval import run_quick_eval  
+from exports import _chat_to_markdown
 
 # --- Timeouts (small, invisible safety net) ---
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
@@ -90,43 +91,6 @@ if st.session_state["vs"] is None:
             st.session_state["ACTIVE_INDEX_DIR"] = active_dir
             from rag_core import save_active_pointer
             save_active_pointer(base_dir, active_dir)
-
-# --- Chat export helper ---
-def _chat_to_markdown(chat_history, title="Chat Transcript"):
-    """
-    Convert st.session_state['chat_history'] into a Markdown string.
-    Each turn should be a dict with: question, answer, sources (list), and optional timestamp keys.
-    """
-    lines = [f"# {title}", ""]
-    for i, turn in enumerate(chat_history or [], 1):
-        ts = turn.get("ts") or turn.get("timestamp") or turn.get("time") or ""
-        q = (turn.get("question") or "").strip()
-        a = (turn.get("answer") or "").strip()
-        sources = turn.get("sources") or []
-
-        lines.append(f"## Turn {i}")
-        if ts:
-            lines.append(f"*Time:* {ts}")
-        lines.append("")
-        lines.append("**Q:** " + (q if q else "_(empty)_"))
-        lines.append("")
-        lines.append("**A:** " + (a if a else "_(empty)_"))
-
-        if sources:
-            lines.append("")
-            lines.append("**Sources:**")
-            for s in sources:
-                if isinstance(s, dict):
-                    ref = s.get("source") or s.get("path") or s.get("doc_id") or str(s)
-                    page = s.get("page")
-                    if page is not None:
-                        lines.append(f"- {ref} (p.{page})")
-                    else:
-                        lines.append(f"- {ref}")
-                else:
-                    lines.append(f"- {s}")
-        lines.append("")
-    return "\n".join(lines)
 
 # ---------- SIDEBAR SETTINGS ----------
 with st.sidebar:

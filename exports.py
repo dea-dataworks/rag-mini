@@ -120,3 +120,40 @@ def to_excel_bytes(qa: Dict) -> bytes:
     with pd.ExcelWriter(out, engine="openpyxl") as xw:
         df.to_excel(xw, index=False, sheet_name="QA")
     return out.getvalue()
+
+# --- Chat export helper ---
+def _chat_to_markdown(chat_history, title="Chat Transcript"):
+    """
+    Convert st.session_state['chat_history'] into a Markdown string.
+    Each turn should be a dict with: question, answer, sources (list), and optional timestamp keys.
+    """
+    lines = [f"# {title}", ""]
+    for i, turn in enumerate(chat_history or [], 1):
+        ts = turn.get("ts") or turn.get("timestamp") or turn.get("time") or ""
+        q = (turn.get("question") or "").strip()
+        a = (turn.get("answer") or "").strip()
+        sources = turn.get("sources") or []
+
+        lines.append(f"## Turn {i}")
+        if ts:
+            lines.append(f"*Time:* {ts}")
+        lines.append("")
+        lines.append("**Q:** " + (q if q else "_(empty)_"))
+        lines.append("")
+        lines.append("**A:** " + (a if a else "_(empty)_"))
+
+        if sources:
+            lines.append("")
+            lines.append("**Sources:**")
+            for s in sources:
+                if isinstance(s, dict):
+                    ref = s.get("source") or s.get("path") or s.get("doc_id") or str(s)
+                    page = s.get("page")
+                    if page is not None:
+                        lines.append(f"- {ref} (p.{page})")
+                    else:
+                        lines.append(f"- {ref}")
+                else:
+                    lines.append(f"- {s}")
+        lines.append("")
+    return "\n".join(lines)
