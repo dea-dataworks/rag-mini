@@ -20,3 +20,20 @@ def _attempt_with_timeout(fn, timeout_s: float, retries: int = 1):
         except Exception as e:
             last_err = str(e)
     return False, None, last_err
+
+# --- observability helpers ---
+def compute_score_stats(pairs):
+    """Compute simple stats over retrieval scores."""
+    scores = [s for (_d, s) in pairs if isinstance(s, (float, int))]
+    if not scores:
+        return {"avg": None, "median": None, "min": None, "max": None}
+    scores.sort()
+    n = len(scores)
+    mid = n // 2
+    median = scores[mid] if n % 2 else (scores[mid - 1] + scores[mid]) / 2
+    return {
+        "avg": round(sum(scores) / n, 4),
+        "median": round(median, 4),
+        "min": round(scores[0], 4),
+        "max": round(scores[-1], 4),
+    }

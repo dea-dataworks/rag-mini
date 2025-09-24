@@ -9,6 +9,8 @@ from docx import Document as DocxDocument
 from collections import defaultdict  
 import io, os, re, math, json, time
 
+from utils.helpers import compute_score_stats
+
 # cache BM25 per-vectorstore to avoid re-tokenizing
 _BM25_CACHE = {}  # key: id(vs) -> SimpleBM25
 
@@ -630,6 +632,7 @@ def build_qa_result(
     docs_used: list,            # sanitized docs actually sent to LLM
     pairs: list,                # [(Document, score)] used for ranking
     meta: dict | None = None,   # {'model': ..., 'top_k': ..., 'retrieval_mode': ...}
+    timings: dict | None = None,
 ) -> dict:
     """
     Package a single QA turn into a consistent dict for UI/storage/export.
@@ -649,14 +652,17 @@ def build_qa_result(
         "answer": answer or "",
         "answer_gist": gist,
         "citations": _dedup_citations(docs_used),
-        "chunks": chunk_rows,                 # legacy/export
-        "retrieved_chunks": chunk_rows,       # new: for UI panel
+        "chunks": chunk_rows,
+        "retrieved_chunks": chunk_rows,
         "meta": {
             "model": meta.get("model"),
             "top_k": int(meta.get("top_k", 0)),
             "retrieval_mode": meta.get("retrieval_mode"),
             "timestamp": meta.get("timestamp"),
         },
+        "metrics": {
+            "scores": compute_score_stats(pairs or []),
+            "timings": timings or {},
+        },
     }
-
 

@@ -1,4 +1,5 @@
 import os
+import time
 import pandas as pd
 import streamlit as st
 import guardrails
@@ -12,7 +13,8 @@ from index_admin import (
 )
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
 from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
-                    render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer)
+                    render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
+                    render_dev_metrics)
 from eval.run_eval import run_eval_snapshot
 from exports import chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
@@ -514,7 +516,10 @@ if preview_btn:
                     # Fallback for older retrieve() signatures
                     return retrieve(vs, question, k=top_k)
 
+            t0 = time.perf_counter()
             ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
+            t_retrieve = (time.perf_counter() - t0) * 1000  # ms
+
 
         if not ok:
             st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
@@ -635,7 +640,9 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                         openai_api_key=st.session_state.get("OPENAI_API_KEY"),
                     )
 
+                t1 = time.perf_counter()
                 ok, answer, err = _attempt_with_timeout(_do_llm, LLM_TIMEOUT_S, retries=1)
+                t_llm = (time.perf_counter() - t1) * 1000  # ms
 
             if not ok:
                 st.info(f"Model {err or 'failed'}. It was cancelled to keep the app responsive. Try again.")
@@ -673,8 +680,12 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                         "model": st.session_state.get("LLM_MODEL"),
                         "top_k": st.session_state.get("TOP_K", top_k),
                         "retrieval_mode": st.session_state.get("RETRIEVE_MODE"),
+                     },
+                    timings={
+                        "retrieve_ms": round(t_retrieve, 1),
+                        "llm_ms": round(t_llm, 1),
                     },
-                )
+                )                
                 st.session_state["last_qa"] = qa
             except Exception as e:
                 st.info(f"Couldn’t package the Q&A for export: {e}")
@@ -683,6 +694,32 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
              # --- Why-this-answer panel (compact; always visible) ---
             if qa:
                 render_why_this_answer(qa)
+                render_dev_metrics(qa)
+            
+            # # --- Dev / observability panel ---
+            # with st.expander("Evaluation / dev metrics", expanded=False):
+            #     st.caption("Latency breakdown and retrieval score stats (per question).")
+
+            #     metrics = qa.get("metrics", {})
+            #     times = metrics.get("timings", {})
+            #     scores = metrics.get("scores", {})
+
+            #     # Small timings table
+            #     t_rows = [{"Step": k, "ms": v} for k, v in times.items()]
+            #     if t_rows:
+            #         st.markdown("**Timings (ms)**")
+            #         st.dataframe(t_rows, use_container_width=True, hide_index=True)
+
+            #     # Small score stats table
+            #     s_rows = [{"Stat": k, "Value": v} for k, v in scores.items()]
+            #     if s_rows:
+            #         st.markdown("**Score stats**")
+            #         st.dataframe(s_rows, use_container_width=True, hide_index=True)
+
+            #     # Tiny bar of scores (if you want to visualize dispersion)
+            #     vals = [r.get("score") for r in qa.get("retrieved_chunks", []) if r.get("score") is not None]
+            #     if vals:
+            #         st.bar_chart(vals, use_container_width=True, height=120)
 
             # Build one history turn and append
             try:

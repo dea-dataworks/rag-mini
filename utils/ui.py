@@ -155,3 +155,35 @@ def render_pdf_limit_note_for_docs(docs):
     """One-time UX note when a list of LangChain Documents includes any PDF source."""
     if any(((d.metadata or {}).get("source","").lower().endswith(".pdf")) for d in (docs or [])):
         st.info("Note: For PDFs, **images/tables aren’t parsed**—snippets and citations refer to text only.")
+
+def render_dev_metrics(qa: dict):
+    """
+    Collapsible panel showing latency breakdown + retrieval score stats for one QA turn.
+    Intended for Advanced/dev use only.
+    """
+    if not qa:
+        return
+
+    metrics = qa.get("metrics", {}) or {}
+    times = metrics.get("timings", {}) or {}
+    scores = metrics.get("scores", {}) or {}
+
+    with st.expander("Evaluation / dev metrics", expanded=False):
+        st.caption("Latency breakdown and retrieval score stats (per question).")
+
+        if times:
+            st.markdown("**Timings (ms)**")
+            t_rows = [{"Step": k, "ms": v} for k, v in times.items()]
+            st.dataframe(t_rows, use_container_width=True, hide_index=True)
+
+        if scores:
+            st.markdown("**Score stats**")
+            s_rows = [{"Stat": k, "Value": v} for k, v in scores.items()]
+            st.dataframe(s_rows, use_container_width=True, hide_index=True)
+
+        vals = [
+            r.get("score") for r in qa.get("retrieved_chunks", [])
+            if isinstance(r.get("score"), (float, int))
+        ]
+        if vals:
+            st.bar_chart(vals, use_container_width=True, height=120)
