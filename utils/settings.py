@@ -12,6 +12,10 @@ DEFAULT_SETTINGS = {
     "score_threshold": 0.0,
     "sanitize": True,
     "debug": False,
+    # --- NEW: guardrail controls ---
+    "guardrails_enabled": True,     # feature flag (UI can honor this)
+    "guardrails_strict": False,     # if True, decline on warnings; else warn-first
+    "min_context_chars": 40,        # thin-context threshold for 'has context'
 }
 
 def load_settings():
@@ -49,6 +53,10 @@ def apply_persisted_defaults(st):
     st.session_state.setdefault("SCORE_THRESH", float(_lc.get("score_threshold", 0.0)))
     st.session_state.setdefault("SANITIZE_RETRIEVED", bool(_lc.get("sanitize", True)))
     st.session_state.setdefault("SHOW_DEBUG", bool(_lc.get("debug", False)))
+    # --- NEW: guardrail keys surfaced to runtime ---
+    st.session_state.setdefault("GUARDRAILS_ENABLED", bool(_lc.get("guardrails_enabled", True)))
+    st.session_state.setdefault("GUARDRAILS_STRICT", bool(_lc.get("guardrails_strict", False)))
+    st.session_state.setdefault("GUARDRAILS_MIN_CONTEXT_CHARS", int(_lc.get("min_context_chars", 40)))
 
 # --- Provenance / export config ---
 
@@ -63,6 +71,10 @@ EXPORTABLE_SETTINGS = [
     "mmr_lambda",
     "use_history",
     "max_history_turns",
+    # --- NEW (optional in exports) ---
+    "guardrails_enabled",
+    "guardrails_strict",
+    "min_context_chars",
 ]
 
 def get_exportable_settings(session_state) -> dict:
@@ -80,5 +92,10 @@ def get_exportable_settings(session_state) -> dict:
         "mmr_lambda": session_state.get("MMR_LAMBDA"),
         "use_history": session_state.get("use_history"),
         "max_history_turns": session_state.get("max_history_turns"),
+        # --- NEW guardrail knobs (optional provenance) ---
+        "guardrails_enabled": session_state.get("GUARDRAILS_ENABLED"),
+        "guardrails_strict": session_state.get("GUARDRAILS_STRICT"),
+        "min_context_chars": session_state.get("GUARDRAILS_MIN_CONTEXT_CHARS"),
     }
     return mapping
+

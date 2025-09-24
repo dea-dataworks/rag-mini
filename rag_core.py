@@ -10,6 +10,7 @@ from collections import defaultdict
 import io, os, re, math, json, time
 
 from utils.helpers import compute_score_stats
+from guardrails import evaluate_guardrails, pick_primary_status
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
 _BM25_CACHE = {}  # key: id(vs) -> SimpleBM25
@@ -633,10 +634,17 @@ def build_qa_result(
     pairs: list,                # [(Document, score)] used for ranking
     meta: dict | None = None,   # {'model': ..., 'top_k': ..., 'retrieval_mode': ...}
     timings: dict | None = None,
+    *,
+    # --- NEW: guardrail inputs (optional; kept keyword-only for backward compat) ---
+    context_text: str = "",
+    sanitize_telemetry: dict | None = None,   # e.g., {"chunks_with_drops": 1, "lines_dropped": 3}
+    scrubbed_lines: list[str] | None = None,  # from guardrails.scrub_context()
 ) -> dict:
     """
     Package a single QA turn into a consistent dict for UI/storage/export.
-    Adds 'retrieved_chunks' with role tags for the Why-this-answer panel.
+    Adds:
+      • 'retrieved_chunks' with role tags (for Why-this-answer)
+      • 'guardrail_statuses' + 'guardrail_primary_status' (for banners/exports)
     """
     meta = dict(meta or {})
     meta.setdefault("top_k", len(pairs) if pairs else 0)
@@ -645,7 +653,20 @@ def build_qa_result(
     txt = (answer or "").strip()
     gist = (txt[:200] + "…") if len(txt) > 200 else txt
 
+    # Build retrieved chunk rows for UI/export
     chunk_rows = _make_chunk_records(pairs or [], snippet_len=300)
+
+    # --- NEW: evaluate guardrails (warn-first; no_context is the only blocker) ---
+    statuses = evaluate_guardrails(
+        question=question or "",
+        context_text=context_text or "",
+        docs_used=docs_used or [],
+        sanitize_telemetry=sanitize_telemetry or {},
+        scrubbed_lines=scrubbed_lines or [],
+        answer_text=answer or "",
+        min_chars=40,
+    )
+    primary = pick_primary_status(statuses)
 
     return {
         "question": question or "",
@@ -654,6 +675,8 @@ def build_qa_result(
         "citations": _dedup_citations(docs_used),
         "chunks": chunk_rows,
         "retrieved_chunks": chunk_rows,
+        "guardrail_statuses": statuses,                 # NEW
+        "guardrail_primary_status": primary,            # NEW
         "meta": {
             "model": meta.get("model"),
             "top_k": int(meta.get("top_k", 0)),
@@ -665,4 +688,5 @@ def build_qa_result(
             "timings": timings or {},
         },
     }
+
 

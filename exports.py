@@ -47,44 +47,71 @@ def _flatten_qa_rows(qa: Dict) -> List[Dict]:
     return rows
 
 # ---------- markdown ----------
-
 def to_markdown(qa: Dict, snippet_max: int = 500) -> str:
     """
     Render a readable Markdown block:
       - header meta
+      - guardrail one-liner (if present)
       - answer block
       - table of retrieved chunks
     """
     meta = qa.get("meta", {}) or {}
     header = [
-        f"### Q&A Export",
+        "### Q&A Export",
         f"- **Timestamp:** {meta.get('timestamp')}",
         f"- **Model:** {meta.get('model') or ''}",
         f"- **Retrieval:** {meta.get('retrieval_mode') or ''} · top_k={meta.get('top_k')}",
-        f"- **Citations:** " + ", ".join(
-            [f"{c.get('source')}" + (f" p.{c.get('page')}" if c.get('page') else "")
-             for c in qa.get('citations', [])]
-        )
     ]
+
+    # Add citations line if present
+    citations = qa.get("citations", []) or []
+    if citations:
+        parts = []
+        for c in citations:
+            src = c.get("source") if isinstance(c, dict) else str(c)
+            page = c.get("page") if isinstance(c, dict) else None
+            if src:
+                if page is not None:
+                    parts.append(f"{src} p.{page}")
+                else:
+                    parts.append(src)
+        if parts:
+            header.append("- **Citations:** " + ", ".join(parts))
+
+    # --- Guardrail one-liner (if present and not ok) ---
+    gr = qa.get("guardrail_primary_status") or {}
+    gr_code = (gr.get("code") or "ok").lower()
+    gr_msg = gr.get("message") or ""
+    guard_line = f"- **Guardrail:** {gr_msg}" if gr_code != "ok" and gr_msg else None
+
     question = qa.get("question", "")
     answer = qa.get("answer", "")
-    # chunk table
-    rows = qa.get("chunks", []) or []
-    lines = []
-    lines.append("| # | Score | Source | Page | Snippet |")
-    lines.append("|---:|-----:|--------|-----:|---------|")
-    for ch in rows:
-        snip = ch.get("snippet", "")[:snippet_max].replace("\n", " ")
-        score = "" if ch.get("score") is None else f"{ch['score']:.4f}"
-        page = "" if ch.get("page") in (None, "") else str(ch["page"])
-        lines.append(f"| {ch.get('rank','')} | {score} | {ch.get('source','')} | {page} | {snip} |")
 
+    # Chunk table
+    rows = qa.get("chunks", []) or []
+    table_lines = [
+        "| # | Score | Source | Page | Snippet |",
+        "|---:|-----:|--------|-----:|---------|",
+    ]
+    for ch in rows:
+        snip = (ch.get("snippet") or "")[:snippet_max].replace("\n", " ")
+        score_val = ch.get("score")
+        score = "" if score_val is None else f"{score_val:.4f}"
+        page = "" if ch.get("page") in (None, "") else str(ch["page"])
+        table_lines.append(
+            f"| {ch.get('rank','')} | {score} | {ch.get('source','')} | {page} | {snip} |"
+        )
+
+    # Build Markdown sections
     md = []
     md.append("\n".join(header))
+    if guard_line:
+        md.append(guard_line)
     md.append("\n**Question**\n\n> " + question)
     md.append("\n**Answer**\n\n" + answer)
     md.append("\n**Retrieved Chunks**\n")
-    md.append("\n".join(lines))
+    md.append("\n".join(table_lines))
+
     return "\n".join(md).strip()
 
 # ---------- CSV / Excel ----------
@@ -126,7 +153,7 @@ def to_excel_bytes(qa: Dict) -> bytes:
 def chat_to_markdown(chat_history, title="Chat Transcript"):
     """
     Convert st.session_state['chat_history'] into a Markdown string.
-    Each turn includes Q, A, sources, and run_settings (provenance).
+    Each turn includes Q, A, sources, run_settings, and (if present) a guardrail note.
     """
     lines = [f"# {title}", ""]
     for i, turn in enumerate(chat_history or [], 1):
@@ -135,6 +162,11 @@ def chat_to_markdown(chat_history, title="Chat Transcript"):
         a = (turn.get("answer") or "").strip()
         sources = turn.get("sources") or []
         run_settings = guard_export_settings(turn.get("run_settings") or {})
+
+        # --- NEW: primary guardrail per turn (if present)
+        gr = turn.get("guardrail_primary_status") or {}
+        gr_code = (gr.get("code") or "ok").lower()
+        gr_msg  = gr.get("message") or ""
 
         lines.append(f"## Turn {i}")
         if ts:
@@ -145,6 +177,11 @@ def chat_to_markdown(chat_history, title="Chat Transcript"):
             lines.append("**Run settings:**")
             for k, v in run_settings.items():
                 lines.append(f"- {k}: {v}")
+
+        # add a compact guardrail note if not OK
+        if gr_code != "ok" and gr_msg:
+            lines.append("")
+            lines.append(f"**Guardrail:** {gr_msg}")
 
         lines.append("")
         lines.append("**Q:** " + (q if q else "_(empty)_"))
@@ -166,3 +203,4 @@ def chat_to_markdown(chat_history, title="Chat Transcript"):
                     lines.append(f"- {s}")
         lines.append("")
     return "\n".join(lines)
+

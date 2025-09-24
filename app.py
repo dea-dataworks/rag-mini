@@ -7,14 +7,14 @@ from llm_chain import build_prompt, call_llm
 from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
                       build_index_from_files, build_citation_tags, build_qa_result,
                       make_fresh_index_dir, read_manifest)
-from guardrails import sanitize_chunks
+from guardrails import sanitize_chunks, pick_primary_status
 from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
 )
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
 from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
                     render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
-                    render_dev_metrics, render_session_export, get_exportable_settings)
+                    render_dev_metrics, render_session_export, get_exportable_settings, render_guardrail_banner)
 from eval.run_eval import run_eval_snapshot
 from exports import chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
@@ -584,7 +584,10 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                 except TypeError:
                     return retrieve(vs, question, k=top_k)
 
+            t0 = time.perf_counter()
             ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
+            t_retrieve = (time.perf_counter() - t0) * 1000  # ms
+
 
         if not ok:
             st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
@@ -610,9 +613,14 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             context_text, bad_lines = guardrails.scrub_context(raw_context)
 
 
-            # Early exit if too thin
+            # Early exit if too thin — show the guardrail banner then stop
             if guardrails.empty_or_thin_context(context_text):
-                st.info("I don’t have enough context to answer that from your documents.")
+                from utils.ui import render_guardrail_banner
+                render_guardrail_banner({
+                    "code": "no_context",
+                    "severity": "block",
+                    "message": "Declined — not enough supporting context in your documents."
+                })
                 st.stop()
 
             # If scrub removed a lot, warn (Phase 3 acceptance: be explicit).
@@ -649,7 +657,6 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                 st.stop()
 
             st.markdown("### Answer")
-            st.write(answer)
 
             # Quick copy buttons (utils.ui)
             try:
@@ -685,42 +692,40 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                         "retrieve_ms": round(t_retrieve, 1),
                         "llm_ms": round(t_llm, 1),
                     },
+                    context_text=context_text,
+                    sanitize_telemetry=sanitize_stats,
+                    scrubbed_lines=bad_lines,
                 )                
+                # Ensure guardrail statuses are present and pick a primary one for UI
+                statuses = qa.get("guardrail_statuses") or qa.get("guardrails") or []
+                primary = qa.get("guardrail_primary_status")
+                if not primary:
+                    primary = pick_primary_status(statuses) if statuses else {"code": "ok", "severity": "info", "message": "OK"}
+                qa["guardrail_primary_status"] = primary
+
                 st.session_state["last_qa"] = qa
             except Exception as e:
                 st.info(f"Couldn’t package the Q&A for export: {e}")
                 qa = None
             
+            # --- Guardrail banner + answer render (single source of truth) ---
+            if qa:
+                primary = qa.get(
+                    "guardrail_primary_status",
+                    {"code": "ok", "severity": "info", "message": "OK"}
+                )
+                render_guardrail_banner(primary)
+
+                if primary.get("code") == "no_context":
+                    st.info("Declined — not enough supporting context. Try rephrasing or uploading more relevant files.")
+                else:
+                    st.write(answer)
+
              # --- Why-this-answer panel (compact; always visible) ---
             if qa:
                 render_why_this_answer(qa)
                 render_dev_metrics(qa)
             
-            # # --- Dev / observability panel ---
-            # with st.expander("Evaluation / dev metrics", expanded=False):
-            #     st.caption("Latency breakdown and retrieval score stats (per question).")
-
-            #     metrics = qa.get("metrics", {})
-            #     times = metrics.get("timings", {})
-            #     scores = metrics.get("scores", {})
-
-            #     # Small timings table
-            #     t_rows = [{"Step": k, "ms": v} for k, v in times.items()]
-            #     if t_rows:
-            #         st.markdown("**Timings (ms)**")
-            #         st.dataframe(t_rows, use_container_width=True, hide_index=True)
-
-            #     # Small score stats table
-            #     s_rows = [{"Stat": k, "Value": v} for k, v in scores.items()]
-            #     if s_rows:
-            #         st.markdown("**Score stats**")
-            #         st.dataframe(s_rows, use_container_width=True, hide_index=True)
-
-            #     # Tiny bar of scores (if you want to visualize dispersion)
-            #     vals = [r.get("score") for r in qa.get("retrieved_chunks", []) if r.get("score") is not None]
-            #     if vals:
-            #         st.bar_chart(vals, use_container_width=True, height=120)
-
             # Build one history turn and append
             try:
                 answer_text = (qa.get("answer") or "").strip()
@@ -732,6 +737,10 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     "sources": qa.get("sources", []),
                     "created_at": (qa.get("meta", {}) or {}).get("timestamp", None),
                     "run_settings": get_exportable_settings(st.session_state),
+                    "guardrail_primary_status": qa.get(
+                        "guardrail_primary_status",
+                        {"code": "ok", "severity": "info", "message": "OK"}
+                    ),
                 }
                 st.session_state["chat_history"].append(history_item)
 

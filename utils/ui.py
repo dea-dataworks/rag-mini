@@ -201,3 +201,71 @@ def render_session_export(chat_history, idx_label: str):
         file_name="chat_transcript.md",
         mime="text/markdown",
     )
+
+
+# ------------------------------
+# Guardrail banners + settings export
+# ------------------------------
+
+import streamlit as st  # (safe: already imported above, but okay to re-import)
+
+def render_guardrail_banner(status: dict | None):
+    """
+    Show a compact banner based on a guardrail status:
+      - severity: "block" -> st.error, "warn" -> st.warning, "info" -> st.info
+      - code: "no_context" | "prompt_injection_warning" | "source_conflict" | "no_citation" | "ok"
+    """
+    if not status:
+        return
+    code = (status.get("code") or "ok").lower()
+    sev  = (status.get("severity") or "info").lower()
+    msg  = status.get("message") or "OK"
+
+    # Prefer warn over block; only block on explicit "block"
+    if sev == "block":
+        st.error(msg, icon="🚫")
+    elif sev == "warn":
+        # Make copy a touch clearer per code
+        if code == "prompt_injection_warning":
+            st.warning(msg, icon="🛡️")
+        elif code == "source_conflict":
+            st.warning(msg, icon="⚖️")
+        elif code == "no_citation":
+            st.warning(msg, icon="🔎")
+        else:
+            st.warning(msg, icon="⚠️")
+    else:
+        if code != "ok":
+            st.info(msg, icon="ℹ️")
+        # if ok, show nothing—keeps UI clean
+
+def get_exportable_settings(state) -> dict:
+    """
+    Snapshot of run settings safe for persistence/export. 
+    Redacts secrets and skips transient UI-only fields.
+    """
+    s = state or {}
+
+    out = {
+        "provider": s.get("LLM_PROVIDER", "ollama"),
+        "model": s.get("LLM_MODEL", "mistral"),
+        "top_k": int(s.get("TOP_K", 4) or 4),
+        "retrieval_mode": s.get("RETRIEVE_MODE", "dense"),
+        "chunk_size": int(s.get("CHUNK_SIZE", 800) or 800),
+        "chunk_overlap": int(s.get("CHUNK_OVERLAP", 120) or 120),
+        "mmr_lambda": float(s.get("MMR_LAMBDA", 0.7) or 0.7),
+        "use_history": bool(s.get("use_history", False)),
+        "max_history_turns": int(s.get("max_history_turns", 4) or 4),
+        "use_score_threshold": bool(s.get("USE_SCORE_THRESH", False)),
+        "score_threshold": float(s.get("SCORE_THRESH", 0.4) or 0.4),
+        "use_per_source_cap": bool(s.get("USE_SOURCE_CAP", False)),
+        "per_source_cap": int(s.get("PER_SOURCE_CAP", 2) or 2),
+        "sanitize_retrieved": bool(s.get("SANITIZE_RETRIEVED", True)),
+    }
+
+    # Never include secrets; if present, mark redacted.
+    if s.get("OPENAI_API_KEY"):
+        out["openai_key"] = "[REDACTED]"
+
+    return out
+
