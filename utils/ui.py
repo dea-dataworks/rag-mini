@@ -87,3 +87,40 @@ def render_copy_row(answer_text: str, citations_text: str):
         render_copy_button("Copy answer", answer_text or "", key="copy_answer_btn")
     with c2:
         render_copy_button("Copy citations", citations_text or "", key="copy_cites_btn")
+
+# --- Why-this-answer panel ---
+def render_why_this_answer(qa: dict, min_items: int = 3, max_items: int = 5):
+    """
+    Compact, always-visible panel that lists top retrieved chunks under the answer.
+    Shows file/page, score, role label, and a one-liner. Roles are annotations only.
+    """
+    items = (qa.get("retrieved_chunks") or qa.get("chunks") or []) or []
+    if not items:
+        return
+    # enforce bounds from settings if available
+    try:
+        from utils.settings import WHY_PANEL_MIN, WHY_PANEL_MAX
+        min_items = WHY_PANEL_MIN
+        max_items = WHY_PANEL_MAX
+    except Exception:
+        pass
+
+    items = items[:max(max_items, min_items)] if len(items) >= min_items else items
+
+    st.markdown("#### Why this answer")
+    st.caption("Top retrieved chunks that informed the response (roles are annotations, not citations).")
+
+    for r in items[:max_items]:
+        src  = r.get("source", "unknown")
+        pg   = r.get("page")
+        sc   = r.get("score")
+        role = (r.get("role") or "context").capitalize()
+        # UX copy kept in UI layer on purpose
+        role_line = {
+            "Definitional": "Defines the key term(s) the answer relies on.",
+            "Fact source": "Provides numbers/dates quoted or referenced.",
+            "Context": "Adds surrounding context that shaped the phrasing.",
+        }.get(role, "Helps ground the answer.")
+        left  = f"**{src}**" + (f" p.{pg}" if pg else "")
+        right = f"score: {sc:.4f}" if isinstance(sc, (float, int)) else "score: —"
+        st.markdown(f"- {left} — _{role}_ · {right}\n  ↳ {role_line}")

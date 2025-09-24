@@ -742,6 +742,11 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             except Exception as e:
                 st.info(f"Couldn’t package the Q&A for export: {e}")
                 qa = None
+            
+             # --- Why-this-answer panel (compact; always visible) ---
+            if qa:
+                from utils.ui import render_why_this_answer
+                render_why_this_answer(qa)
 
             # Build one history turn and append
             try:

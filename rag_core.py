@@ -8,6 +8,7 @@ from pypdf import PdfReader
 from docx import Document as DocxDocument
 from collections import defaultdict  
 import io, os, re, math, json, time
+import re, time
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
 _BM25_CACHE = {}  # key: id(vs) -> SimpleBM25
@@ -626,18 +627,43 @@ def enforce_citation(answer: str, fallback: str) -> str:
         return txt
     return fallback
 
-# === EXPORT PAYLOAD HELPERS ===
+# --- Role tagging (very light heuristics) ---
+_NUM_RE   = re.compile(r"\b\d{1,2}[:/.-]\d{1,2}[:/.-]\d{2,4}\b|\b\d{4}\b|\b\d+(?:\.\d+)?\b", re.IGNORECASE)
+_MONTH_RE = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b", re.IGNORECASE)
+_QUOTE_RE = re.compile(r"[\"“”]")
 
+def _infer_chunk_role(text: str, rank: int) -> str:
+    """
+    Tiny heuristic:
+      - first-ranked chunk with definitional cue -> 'definitional'
+      - contains numbers/dates/quotes -> 'fact source'
+      - otherwise -> 'context'
+    """
+    t = (text or "").strip()
+    head = t.split("\n", 1)[0][:240].lower()
+
+    if rank == 1 and any(k in head for k in [" is ", " are ", " refers to ", " means ", " defined as "]):
+        return "definitional"
+
+    if _NUM_RE.search(t) or _MONTH_RE.search(t) or _QUOTE_RE.search(t):
+        return "fact source"
+
+    return "context"
+
+# === EXPORT PAYLOAD HELPERS ===
 def _make_chunk_records(pairs, snippet_len: int = 300):
     """
     Convert normalized retrieval pairs into export-friendly dicts.
-    Each has: rank, score, source, page, chunk_id (if any), snippet.
+    Each: rank, score, source, page, chunk_id, snippet, short_snippet, role.
     """
     rows = []
     for i, (doc, score) in enumerate(pairs, start=1):
         meta = doc.metadata or {}
         full = (doc.page_content or "").replace("\n", " ")
         snippet = full[:snippet_len] + ("…" if len(full) > snippet_len else "")
+        short = full[:160] + ("…" if len(full) > 160 else "")
+        role = _infer_chunk_role(full, rank=i)
+
         rows.append({
             "rank": i,
             "score": float(score) if isinstance(score, (float, int)) else None,
@@ -645,6 +671,8 @@ def _make_chunk_records(pairs, snippet_len: int = 300):
             "page": meta.get("page", None),
             "chunk_id": meta.get("id") or meta.get("chunk_id"),
             "snippet": snippet,
+            "short_snippet": short,
+            "role": role,
         })
     return rows
 
@@ -662,31 +690,33 @@ def _dedup_citations(docs):
     out.sort(key=lambda r: (r["source"], r["page"] or 0))
     return out
 
-
 def build_qa_result(
     question: str,
     answer: str,
-    docs_used: list,            # list[Document] actually sent to the LLM (post-sanitize)
-    pairs: list,                # list[(Document, score)] used for ranking/export
-    meta: dict | None = None,   # e.g., {'model': 'mistral', 'top_k': 4, 'retrieval_mode': 'dense'}
+    docs_used: list,            # sanitized docs actually sent to LLM
+    pairs: list,                # [(Document, score)] used for ranking
+    meta: dict | None = None,   # {'model': ..., 'top_k': ..., 'retrieval_mode': ...}
 ) -> dict:
     """
-    Package a single QA turn into a consistent dict for UI storage and export.
+    Package a single QA turn into a consistent dict for UI/storage/export.
+    Adds 'retrieved_chunks' with role tags for the Why-this-answer panel.
     """
     meta = dict(meta or {})
     meta.setdefault("top_k", len(pairs) if pairs else 0)
     meta.setdefault("timestamp", time.strftime("%Y-%m-%dT%H:%M:%S"))
 
-    # Create a short gist for chat conditioning / history UIs
     txt = (answer or "").strip()
     gist = (txt[:200] + "…") if len(txt) > 200 else txt
+
+    chunk_rows = _make_chunk_records(pairs or [], snippet_len=300)
 
     return {
         "question": question or "",
         "answer": answer or "",
         "answer_gist": gist,
         "citations": _dedup_citations(docs_used),
-        "chunks": _make_chunk_records(pairs or []),
+        "chunks": chunk_rows,                 # legacy/export
+        "retrieved_chunks": chunk_rows,       # new: for UI panel
         "meta": {
             "model": meta.get("model"),
             "top_k": int(meta.get("top_k", 0)),
@@ -694,4 +724,5 @@ def build_qa_result(
             "timestamp": meta.get("timestamp"),
         },
     }
+
 
