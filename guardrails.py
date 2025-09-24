@@ -47,3 +47,4 @@ def has_citation(text: str) -> bool:
 FALLBACK_NO_CITATION = (
     "I don’t have enough context to answer that from the provided documents."
 )
+

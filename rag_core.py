@@ -611,21 +611,7 @@ def sanitize_chunks(chunks):
     }
     return clean, telemetry
 
-# --- Citation Enforcer (tiny safety net) ---
 
-# Accept "(anything p.<digits>)" inside parentheses as a valid citation,
-# e.g., (myfile.pdf p.3)
-_CITATION_RE = re.compile(r"\([^)]+ p\.\d+\)")
-
-def enforce_citation(answer: str, fallback: str) -> str:
-    """
-    Ensure the final answer contains at least one '(file p.X)'-style citation.
-    If none found, return the provided fallback string (same as WU1).
-    """
-    txt = answer or ""
-    if _CITATION_RE.search(txt):
-        return txt
-    return fallback
 
 # --- Role tagging (very light heuristics) ---
 _NUM_RE   = re.compile(r"\b\d{1,2}[:/.-]\d{1,2}[:/.-]\d{2,4}\b|\b\d{4}\b|\b\d+(?:\.\d+)?\b", re.IGNORECASE)
