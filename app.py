@@ -13,6 +13,30 @@ from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
 )
 
+# --- Timeouts (small, invisible safety net) ---
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+
+RETRIEVAL_TIMEOUT_S = 12
+LLM_TIMEOUT_S = 25
+
+def _attempt_with_timeout(fn, timeout_s: float, retries: int = 1):
+    """
+    Run fn() with a timeout. If it times out or errors, retry up to `retries` once.
+    Returns (ok: bool, value_or_none, err_msg_or_none).
+    """
+    last_err = None
+    for _ in range(retries + 1):
+        try:
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(fn)
+                return True, fut.result(timeout=timeout_s), None
+        except _FutTimeout:
+            last_err = f"timed out after {timeout_s}s"
+        except Exception as e:
+            last_err = str(e)
+    return False, None, last_err
+
+
 # ---------- CONFIG ----------
 APP_TITLE = "🔎 RAG Mini v0.2"
 PERSIST_DIR = "rag_store"  
@@ -502,21 +526,25 @@ if preview_btn:
         st.error("No vector store found. Build the index first (Step 1).")
     else:
         with st.spinner("Retrieving…"):
-            # Try to pass mmr if supported; otherwise fall back silently
             mode = st.session_state.get("RETRIEVE_MODE", "dense")
-            try:
-                hits_raw = retrieve(
-                    vs, question,
-                    k=top_k,
-                    mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
-                    mode=mode,
-                )
-            except TypeError:
-                # Fallback for older retrieve() signatures
-                hits_raw = retrieve(vs, question, k=top_k)
 
+            def _do_retrieve():
+                try:
+                    return retrieve(
+                        vs, question,
+                        k=top_k,
+                        mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
+                        mode=mode,
+                    )
+                except TypeError:
+                    # Fallback for older retrieve() signatures
+                    return retrieve(vs, question, k=top_k)
 
-        if not hits_raw:
+            ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
+
+        if not ok:
+            st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
+        elif not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
         else:
             # normalize to [(doc, score)]
@@ -566,17 +594,26 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
     else:
         with st.spinner("Retrieving…"):
             mode = st.session_state.get("RETRIEVE_MODE", "dense")
-            try:
-                hits_raw = retrieve(
-                    vs, question,
-                    k=top_k,
-                    mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
-                    mode=mode,
-                )
-            except TypeError:
-                hits_raw = retrieve(vs, question, k=top_k)
 
+            def _do_retrieve():
+                try:
+                    return retrieve(
+                        vs, question,
+                        k=top_k,
+                        mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
+                        mode=mode,
+                    )
+                except TypeError:
+                    return retrieve(vs, question, k=top_k)
 
+            ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
+
+        if not ok:
+            st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
+            st.stop()
+        elif not hits_raw:
+            st.info("No results. Try a simpler question or rebuild the index.")
+            st.stop()
         if not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
         else:
@@ -619,13 +656,20 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             )
 
             with st.spinner("Thinking…"):
-                answer = call_llm(
-                    prompt,
-                    provider=st.session_state.get("LLM_PROVIDER", "ollama"),
-                    model_name=st.session_state.get("LLM_MODEL", "mistral"),
-                    openai_api_key=st.session_state.get("OPENAI_API_KEY"),
-                )
+                def _do_llm():
+                    return call_llm(
+                        prompt,
+                        provider=st.session_state.get("LLM_PROVIDER", "ollama"),
+                        model_name=st.session_state.get("LLM_MODEL", "mistral"),
+                        openai_api_key=st.session_state.get("OPENAI_API_KEY"),
+                    )
 
+                ok, answer, err = _attempt_with_timeout(_do_llm, LLM_TIMEOUT_S, retries=1)
+
+            if not ok:
+                st.info(f"Model {err or 'failed'}. It was cancelled to keep the app responsive. Try again.")
+                st.stop()
+                
             st.markdown("### Answer")
             st.write(answer)
 
