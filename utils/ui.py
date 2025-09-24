@@ -124,3 +124,5 @@ def render_why_this_answer(qa: dict, min_items: int = 3, max_items: int = 5):
         left  = f"**{src}**" + (f" p.{pg}" if pg else "")
         right = f"score: {sc:.4f}" if isinstance(sc, (float, int)) else "score: —"
         st.markdown(f"- {left} — _{role}_ · {right}\n  ↳ {role_line}")
+
+
