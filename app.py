@@ -122,6 +122,7 @@ with st.sidebar:
         st.markdown(
         """
 1. **Upload docs** in the main area (`.pdf` / `.txt`).
+- **Limitation:** PDF **images and tables aren’t parsed yet** — only the text layer is indexed.
 2. **Build / Load Index**  
    - Turn **Rebuild from current uploads** ON → creates a fresh index.  
    - Leave it OFF → loads the last active index for the selected base folder.
@@ -252,6 +253,13 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
     key=f"uploader_{st.session_state['UPLOAD_KEY']}",
 )
+
+# --- UX note for PDFs (images/tables not parsed yet) ---
+if uploaded_files and any(f.name.lower().endswith(".pdf") for f in uploaded_files):
+    st.info(
+        "Heads-up: PDF **images and tables aren’t parsed yet**. "
+        "Only the text layer is indexed (scanned PDFs may yield little/no text)."
+    )
 
 # small control to clear uploads without restarting
 clear_col, _ = st.columns([1, 3])
@@ -510,6 +518,10 @@ if preview_btn:
                 )
 
             st.markdown("### Retrieved Chunks")
+            # One-time note if any retrieved chunk comes from a PDF
+            if any(((d.metadata or {}).get("source", "").lower().endswith(".pdf")) for d in docs_only):
+                st.info("Note: For PDFs, **images/tables aren’t parsed**—snippets and citations refer to text only.")
+
             for i, d in enumerate(docs_only, start=1):
                 m = d.metadata or {}
                 src = m.get("source", "unknown")
@@ -518,7 +530,6 @@ if preview_btn:
                 hdr = f"Chunk {i} — {src}" + (f" p.{pg}" if pg else "") + (f"  [{cid}]" if cid else "")
                 with st.expander(hdr):
                     st.write(d.page_content)
-
 
 if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
     # reset the Enter-trigger for next time
@@ -698,6 +709,10 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
 
             # --- Optional: Show cited chunks (subset used in the prompt) ---
             with st.expander("Show cited chunks", expanded=False):
+                # One-time note if any cited chunk comes from a PDF
+                if any(((d.metadata or {}).get("source", "").lower().endswith(".pdf")) for d in docs_only):
+                    st.info("Cited PDF chunks reference **text only**; images and tables aren’t parsed yet.")
+
                 maxlen = st.session_state.get("SNIPPET_LEN", 240)
                 for i, d in enumerate(docs_only, start=1):
                     m = d.metadata or {}
@@ -709,7 +724,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                         header += f"  [{cid}]"
                     st.markdown(f"**Chunk {i} — {header}**")
                     st.write(d.page_content)
-                       
+
             st.markdown("### Chat (History)")
 
             hist = st.session_state.get("chat_history", [])
