@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import streamlit as st
-
 import guardrails
 from llm_chain import build_prompt, call_llm
 from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
@@ -12,6 +11,9 @@ from exports import to_markdown, to_csv_bytes, to_excel_bytes
 from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
 )
+from utils.settings import seed_session_from_settings, save_settings, DEFAULT_SETTINGS  
+from utils.ui import render_copy_button, sidebar_pipeline_diagram  
+from eval.quick_eval import run_quick_eval  
 
 # --- Timeouts (small, invisible safety net) ---
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
@@ -38,12 +40,29 @@ def _attempt_with_timeout(fn, timeout_s: float, retries: int = 1):
 
 
 # ---------- CONFIG ----------
-APP_TITLE = "🔎 RAG Mini v0.2"
+APP_TITLE = "RAG Mini"
 PERSIST_DIR = "rag_store"  
 EMBED_MODEL = "nomic-embed-text"
 
-st.set_page_config(page_title="RAG Mini v0.1", layout="wide")
+st.set_page_config(page_title="RAG Mini", layout="wide")
+# Load last-used settings into session (persisted in settings.json)
+seed_session_from_settings(st)
+
+
+_lc = st.session_state
+st.session_state.setdefault("CHUNK_SIZE", int(_lc.get("chunk_size", 800)))
+st.session_state.setdefault("CHUNK_OVERLAP", int(_lc.get("chunk_overlap", 120)))
+st.session_state.setdefault("TOP_K", int(_lc.get("k", 4)))
+st.session_state.setdefault("LLM_PROVIDER", _lc.get("provider", "ollama"))
+st.session_state.setdefault("use_history", bool(_lc.get("use_history", False)))
+st.session_state.setdefault("max_history_turns", int(_lc.get("max_history_turns", 3)))
+st.session_state.setdefault("MMR_LAMBDA", float(_lc.get("mmr_lambda", 0.7)))
+st.session_state.setdefault("SCORE_THRESH", float(_lc.get("score_threshold", 0.0)))
+st.session_state.setdefault("SANITIZE_RETRIEVED", bool(_lc.get("sanitize", True)))
+st.session_state.setdefault("SHOW_DEBUG", bool(_lc.get("debug", False)))
+
 st.title(APP_TITLE)
+st.caption("v0.2") 
 st.caption("Local, simple Retrieval-Augmented Q&A (scope-first)")
 
 # ---------- SESSION DEFAULTS ----------
@@ -127,6 +146,8 @@ def _chat_to_markdown(chat_history, title="Chat Transcript"):
 # ---------- SIDEBAR SETTINGS ----------
 with st.sidebar:
     st.header("Settings")
+    # Compact pipeline diagram (utils.ui)
+    sidebar_pipeline_diagram()
 
     # --- Regular (simple) controls ---
     embed_model   = EMBED_MODEL  # keep embeddings local (Ollama) in v0.2
@@ -134,7 +155,7 @@ with st.sidebar:
     chunk_overlap = st.number_input("Chunk overlap", 0, 1000, 120, 10)
     top_k         = st.slider("Top-k retrieval", 1, 10, 4)
 
-        # Persist basic controls
+    # Persist basic controls
     st.session_state.update({
         "CHUNK_SIZE": int(chunk_size),
         "CHUNK_OVERLAP": int(chunk_overlap),
@@ -261,6 +282,34 @@ with st.sidebar:
                     help="Base folder under rag_store/. Each rebuild creates a fresh subfolder.")
         base_dir = os.path.join(PERSIST_DIR, suffix) if suffix.strip() else PERSIST_DIR
         os.makedirs(base_dir, exist_ok=True)
+
+        # --- Preferences persistence (save last-used settings to settings.json) ---
+        st.markdown("---")
+        st.markdown("###### Preferences")
+        auto_save = st.checkbox(
+            "Persist settings to disk",
+            value=True,
+            help="Save last-used settings to settings.json"
+        )
+
+        _current = {
+            "chunk_size": st.session_state.get("CHUNK_SIZE", 800),
+            "chunk_overlap": st.session_state.get("CHUNK_OVERLAP", 120),
+            "k": st.session_state.get("TOP_K", 4),
+            "provider": st.session_state.get("LLM_PROVIDER", "ollama"),
+            "use_history": st.session_state.get("use_history", False),
+            "max_history_turns": st.session_state.get("max_history_turns", 4),
+            "mmr_lambda": st.session_state.get("MMR_LAMBDA", 0.7),
+            "score_threshold": st.session_state.get("SCORE_THRESH", 0.4),
+            "sanitize": st.session_state.get("SANITIZE_RETRIEVED", True),
+            "debug": st.session_state.get("SHOW_DEBUG", False),
+        }
+
+        if auto_save:
+            try:
+                save_settings(_current)
+            except Exception as e:
+                st.caption(f"Could not save settings: {e}")
 
         # Important: sidebar only sets the BASE_DIR. The active index is set by the Build step.
         st.session_state["BASE_DIR"] = base_dir
@@ -669,9 +718,21 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             if not ok:
                 st.info(f"Model {err or 'failed'}. It was cancelled to keep the app responsive. Try again.")
                 st.stop()
-                
+
             st.markdown("### Answer")
             st.write(answer)
+
+            # Quick copy buttons (utils.ui)
+            try:
+                citations_str = "; ".join(build_citation_tags(docs_only)) if docs_only else ""
+            except Exception:
+                citations_str = ""
+
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                render_copy_button("Copy answer", answer or "", key="copy_answer_btn")
+            with col_b:
+                render_copy_button("Copy citations", citations_str or "", key="copy_cites_btn")
 
             # Optional badge about sanitization
             if sanitize_stats.get("lines_dropped", 0) > 0:
@@ -866,6 +927,35 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     st.session_state["TRIGGER_ANSWER"] = True
                     st.rerun()
 
+# ---------- QUICK EVAL (DEV) ----------
+with st.expander("🔎 Quick Eval (dev)"):
+    st.caption("Baseline k-NN vs Hybrid (BM25+Dense) using eval/qa.jsonl against the current index.")
+    qpath = st.text_input("Questions file", value="eval/qa.jsonl")
+    k_eval = st.number_input("k", min_value=1, max_value=10, value=int(st.session_state.get("TOP_K", 4)))
+    mmr_lambda = st.slider("MMR λ (hybrid)", 0.0, 1.0, float(st.session_state.get("MMR_LAMBDA", 0.7)), 0.05)
+
+    if st.button("Run quick eval"):
+        
+        df, summary = run_quick_eval(
+            qpath=qpath,
+            k_eval=int(k_eval),
+            mmr_lambda=float(mmr_lambda),
+            embed_model=EMBED_MODEL,
+            persist_dir="rag_store",
+        )
+        if df.empty:
+            st.warning(summary.get("msg", "No results or no questions found."))
+        else:
+            st.dataframe(df, height=260, use_container_width=True)
+            st.write(f"**hit@{summary['k']}** — baseline: {summary['mean_baseline_hit']:.3f} | hybrid: {summary['mean_hybrid_hit']:.3f}")
+            st.write(f"**MRR** — baseline: {summary['mean_baseline_mrr']:.3f} | hybrid: {summary['mean_hybrid_mrr']:.3f}")
+            st.write(f"**Improved MRR:** {summary['improved_mrr_count']}/{summary['total']} queries")
+            st.download_button(
+                "Download results (.csv)",
+                data=df.to_csv(index=False).encode("utf-8"),
+                file_name="eval_results.csv",
+                mime="text/csv",
+            )
 
 # ---------- FOOTER ----------
 st.markdown("---")
