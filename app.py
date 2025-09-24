@@ -11,7 +11,7 @@ from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
 )
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
-from utils.ui import render_copy_button, sidebar_pipeline_diagram, render_export_buttons, render_copy_row 
+from utils.ui import render_copy_button, sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander
 from eval.quick_eval import run_quick_eval  
 from exports import _chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
@@ -717,22 +717,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                 render_export_buttons(qa)
 
             # --- Optional: Show cited chunks (subset used in the prompt) ---
-            with st.expander("Show cited chunks", expanded=False):
-                # One-time note if any cited chunk comes from a PDF
-                if any(((d.metadata or {}).get("source", "").lower().endswith(".pdf")) for d in docs_only):
-                    st.info("Cited PDF chunks reference **text only**; images and tables aren’t parsed yet.")
-
-                maxlen = st.session_state.get("SNIPPET_LEN", 240)
-                for i, d in enumerate(docs_only, start=1):
-                    m = d.metadata or {}
-                    src = m.get("source", "unknown")
-                    pg  = m.get("page", None)
-                    cid = m.get("chunk_id") or m.get("id")
-                    header = f"{src}" + (f" p.{pg}" if pg else "")
-                    if cid:
-                        header += f"  [{cid}]"
-                    st.markdown(f"**Chunk {i} — {header}**")
-                    st.write(d.page_content)
+            render_cited_chunks_expander(docs_only, snippet_len=240)
 
             st.markdown("### Chat (History)")
 
