@@ -35,3 +35,18 @@ def seed_session_from_settings(st):
     for k, v in settings.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+def apply_persisted_defaults(st):
+    """Bridge lower-case persisted keys -> existing UPPERCASE app keys."""
+    _lc = st.session_state
+    st.session_state.setdefault("CHUNK_SIZE", int(_lc.get("chunk_size", 800)))
+    st.session_state.setdefault("CHUNK_OVERLAP", int(_lc.get("chunk_overlap", 120)))
+    st.session_state.setdefault("TOP_K", int(_lc.get("k", 4)))
+    st.session_state.setdefault("LLM_PROVIDER", _lc.get("provider", "ollama"))
+    st.session_state.setdefault("use_history", bool(_lc.get("use_history", False)))
+    st.session_state.setdefault("max_history_turns", int(_lc.get("max_history_turns", 3)))
+    st.session_state.setdefault("MMR_LAMBDA", float(_lc.get("mmr_lambda", 0.7)))
+    st.session_state.setdefault("SCORE_THRESH", float(_lc.get("score_threshold", 0.0)))
+    st.session_state.setdefault("SANITIZE_RETRIEVED", bool(_lc.get("sanitize", True)))
+    st.session_state.setdefault("SHOW_DEBUG", bool(_lc.get("debug", False)))
+

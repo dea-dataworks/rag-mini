@@ -6,13 +6,11 @@ from llm_chain import build_prompt, call_llm
 from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
                       build_index_from_files, build_citation_tags, sanitize_chunks, build_qa_result,
                       make_fresh_index_dir, read_manifest)
-
-from exports import to_markdown, to_csv_bytes, to_excel_bytes
 from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
 )
-from utils.settings import seed_session_from_settings, save_settings, DEFAULT_SETTINGS  
-from utils.ui import render_copy_button, sidebar_pipeline_diagram  
+from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
+from utils.ui import render_copy_button, sidebar_pipeline_diagram, render_export_buttons, render_copy_row 
 from eval.quick_eval import run_quick_eval  
 
 # --- Timeouts (small, invisible safety net) ---
@@ -47,20 +45,7 @@ EMBED_MODEL = "nomic-embed-text"
 st.set_page_config(page_title="RAG Mini", layout="wide")
 # Load last-used settings into session (persisted in settings.json)
 seed_session_from_settings(st)
-
-
-_lc = st.session_state
-st.session_state.setdefault("CHUNK_SIZE", int(_lc.get("chunk_size", 800)))
-st.session_state.setdefault("CHUNK_OVERLAP", int(_lc.get("chunk_overlap", 120)))
-st.session_state.setdefault("TOP_K", int(_lc.get("k", 4)))
-st.session_state.setdefault("LLM_PROVIDER", _lc.get("provider", "ollama"))
-st.session_state.setdefault("use_history", bool(_lc.get("use_history", False)))
-st.session_state.setdefault("max_history_turns", int(_lc.get("max_history_turns", 3)))
-st.session_state.setdefault("MMR_LAMBDA", float(_lc.get("mmr_lambda", 0.7)))
-st.session_state.setdefault("SCORE_THRESH", float(_lc.get("score_threshold", 0.0)))
-st.session_state.setdefault("SANITIZE_RETRIEVED", bool(_lc.get("sanitize", True)))
-st.session_state.setdefault("SHOW_DEBUG", bool(_lc.get("debug", False)))
-
+apply_persisted_defaults(st)
 st.title(APP_TITLE)
 st.caption("v0.2") 
 st.caption("Local, simple Retrieval-Augmented Q&A (scope-first)")
@@ -728,11 +713,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             except Exception:
                 citations_str = ""
 
-            col_a, col_b = st.columns([1, 1])
-            with col_a:
-                render_copy_button("Copy answer", answer or "", key="copy_answer_btn")
-            with col_b:
-                render_copy_button("Copy citations", citations_str or "", key="copy_cites_btn")
+            render_copy_row(answer, citations_str)
 
             # Optional badge about sanitization
             if sanitize_stats.get("lines_dropped", 0) > 0:
@@ -785,57 +766,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             # === Exports (latest turn) ===
             if qa:
                 st.markdown("#### Exports")
-                ts = (qa.get("meta", {}) or {}).get("timestamp", "")
-                safe_ts = ts.replace(":", "-") if ts else ""
-                base_name = f"qa_{safe_ts}" if safe_ts else "qa_latest"
-
-                # Precompute payloads
-                try:
-                    md_payload = to_markdown(qa)
-                except Exception as e:
-                    md_payload = f"Q&A Export failed to render markdown: {e}"
-
-                try:
-                    csv_payload = to_csv_bytes(qa)
-                except Exception as e:
-                    csv_payload = f"CSV export failed: {e}".encode("utf-8")
-
-                # Excel may be unavailable if pandas/openpyxl not installed
-                excel_ok = True
-                try:
-                    xlsx_payload = to_excel_bytes(qa)
-                except Exception as e:
-                    excel_ok = False
-                    xlsx_err = str(e)
-
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.download_button(
-                        "Download Markdown",
-                        data=md_payload,
-                        file_name=f"{base_name}.md",
-                        mime="text/markdown",
-                        use_container_width=True,
-                    )
-                with c2:
-                    st.download_button(
-                        "Download CSV",
-                        data=csv_payload,
-                        file_name=f"{base_name}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
-                with c3:
-                    if excel_ok:
-                        st.download_button(
-                            "Download Excel",
-                            data=xlsx_payload,
-                            file_name=f"{base_name}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
-                        )
-                    else:
-                        st.info(f"Excel export unavailable: {xlsx_err}")
+                render_export_buttons(qa)
 
             # --- Optional: Show cited chunks (subset used in the prompt) ---
             with st.expander("Show cited chunks", expanded=False):
