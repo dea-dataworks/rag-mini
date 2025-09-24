@@ -377,12 +377,37 @@ else:
     st.caption(f"Active index path: `{active_dir}`")
     mf = read_manifest(active_dir)
     if mf:
+        # Manifest summary (what the index was built with)
         st.write(
-                f"**Built:** {mf.get('timestamp','?')} — "
-                f"**Docs:** {mf.get('num_docs',0)} — "
-                f"**Chunks:** {mf.get('num_chunks',0)} — "
-                f"**Avg chunk len:** {mf.get('avg_chunk_len',0)} chars"
+            f"**Built:** {mf.get('timestamp','?')} — "
+            f"**Docs:** {mf.get('num_docs',0)} — "
+            f"**Chunks:** {mf.get('num_chunks',0)} — "
+            f"**Avg chunk len:** {mf.get('avg_chunk_len',0)} chars"
+        )
+
+        # --- Settings mismatch warning (manifest params vs current UI) ---
+        mf_params = (mf.get("params") or {})
+        current_params = {
+            "embed_model": EMBED_MODEL,
+            "chunk_size": st.session_state.get("CHUNK_SIZE", 800),
+            "chunk_overlap": st.session_state.get("CHUNK_OVERLAP", 120),
+        }
+        # Collect keys where the values differ (including missing in manifest)
+        diff_keys = [k for k, v in current_params.items() if mf_params.get(k) != v]
+
+        if diff_keys:
+            # Build a human-friendly diff list
+            lines = []
+            for k in diff_keys:
+                lines.append(
+                    f"- **{k}**: index = `{mf_params.get(k, '∅')}` | UI = `{current_params[k]}`"
+                )
+            st.warning(
+                "Settings differ from the active index. "
+                "Rebuild with the current UI settings to apply changes, or continue using the index as-is.\n\n"
+                + "\n".join(lines)
             )
+
         pf = mf.get("per_file", {}) or {}
         if pf:
             rows = [
