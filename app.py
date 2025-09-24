@@ -867,12 +867,13 @@ with st.expander("🔎 Quick Eval (dev)"):
 
     if st.button("Run quick eval"):
         
+        persist_dir = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
         df, summary = run_quick_eval(
             qpath=qpath,
             k_eval=int(k_eval),
             mmr_lambda=float(mmr_lambda),
             embed_model=EMBED_MODEL,
-            persist_dir="rag_store",
+            persist_dir=persist_dir,
         )
         if df.empty:
             st.warning(summary.get("msg", "No results or no questions found."))
