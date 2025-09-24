@@ -143,3 +143,15 @@ def render_cited_chunks_expander(docs_only, snippet_len: int = 240):
             left = f"**{src}**" + (f" p.{pg}" if pg else "")
             st.markdown(f"- {left}\n\n  {snippet}")
 
+def render_pdf_limit_note_for_uploads(uploaded_files):
+    """One-time UX note when user has uploaded PDFs."""
+    if uploaded_files and any(f.name.lower().endswith(".pdf") for f in uploaded_files):
+        st.info(
+            "Heads-up: PDF **images and tables aren’t parsed yet**. "
+            "Only the text layer is indexed (scanned PDFs may yield little/no text)."
+        )
+
+def render_pdf_limit_note_for_docs(docs):
+    """One-time UX note when a list of LangChain Documents includes any PDF source."""
+    if any(((d.metadata or {}).get("source","").lower().endswith(".pdf")) for d in (docs or [])):
+        st.info("Note: For PDFs, **images/tables aren’t parsed**—snippets and citations refer to text only.")

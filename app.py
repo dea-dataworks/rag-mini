@@ -11,9 +11,10 @@ from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
 )
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
-from utils.ui import render_copy_button, sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander
+from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
+                    render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer)
 from eval.quick_eval import run_quick_eval  
-from exports import _chat_to_markdown
+from exports import chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
 
 
@@ -256,11 +257,7 @@ uploaded_files = st.file_uploader(
 )
 
 # --- UX note for PDFs (images/tables not parsed yet) ---
-if uploaded_files and any(f.name.lower().endswith(".pdf") for f in uploaded_files):
-    st.info(
-        "Heads-up: PDF **images and tables aren’t parsed yet**. "
-        "Only the text layer is indexed (scanned PDFs may yield little/no text)."
-    )
+render_pdf_limit_note_for_uploads(uploaded_files)
 
 # small control to clear uploads without restarting
 clear_col, _ = st.columns([1, 3])
@@ -549,8 +546,7 @@ if preview_btn:
 
             st.markdown("### Retrieved Chunks")
             # One-time note if any retrieved chunk comes from a PDF
-            if any(((d.metadata or {}).get("source", "").lower().endswith(".pdf")) for d in docs_only):
-                st.info("Note: For PDFs, **images/tables aren’t parsed**—snippets and citations refer to text only.")
+            render_pdf_limit_note_for_docs(docs_only)
 
             for i, d in enumerate(docs_only, start=1):
                 m = d.metadata or {}
@@ -591,8 +587,6 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
         elif not hits_raw:
             st.info("No results. Try a simpler question or rebuild the index.")
             st.stop()
-        if not hits_raw:
-            st.info("No results. Try a simpler question or rebuild the index.")
         else:
             # normalize to [(doc, score)]
             norm = normalize_hits(hits_raw)
@@ -688,7 +682,6 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             
              # --- Why-this-answer panel (compact; always visible) ---
             if qa:
-                from utils.ui import render_why_this_answer
                 render_why_this_answer(qa)
 
             # Build one history turn and append
@@ -750,7 +743,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     # Nice title uses the active index dir (fallback to base dir if none)
                     idx_label = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
                     transcript_title = f"Chat Transcript — {os.path.basename(idx_label)}"
-                    chat_md = _chat_to_markdown(st.session_state.get("chat_history", []), title=transcript_title)
+                    chat_md = chat_to_markdown(st.session_state.get("chat_history", []), title=transcript_title)
 
                     st.download_button(
                         "Export chat (.md)",
