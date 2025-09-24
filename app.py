@@ -303,9 +303,13 @@ if build_btn:
                 st.session_state["ACTIVE_INDEX_DIR"] = fresh_dir
                 save_active_pointer(base_dir, fresh_dir)
 
-                st.success(f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}")
+                st.success(
+                    f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}, "
+                    f"avg chunk len: {stats.get('avg_chunk_len', 0)} chars"
+                )
                 st.caption(f"Active index: `{fresh_dir}`")
                 st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
+
 
             # Guard (a): warn if no valid chunks
             if stats["num_chunks"] == 0:
@@ -365,13 +369,24 @@ else:
     st.caption(f"Active index path: `{active_dir}`")
     mf = read_manifest(active_dir)
     if mf:
-        st.write(f"**Built:** {mf.get('timestamp','?')} — **Docs:** {mf.get('num_docs',0)} — **Chunks:** {mf.get('num_chunks',0)}")
+        st.write(
+                f"**Built:** {mf.get('timestamp','?')} — "
+                f"**Docs:** {mf.get('num_docs',0)} — "
+                f"**Chunks:** {mf.get('num_chunks',0)} — "
+                f"**Avg chunk len:** {mf.get('avg_chunk_len',0)} chars"
+            )
         pf = mf.get("per_file", {}) or {}
         if pf:
             rows = [
-                {"File": k, "Pages": v.get("pages", 0), "Chunks": v.get("chunks", 0)}
-                for k, v in sorted(pf.items(), key=lambda x: x[0].lower())
-            ]
+                        {
+                            "File": k,
+                            "Pages": v.get("pages", 0),
+                            "Chunks": v.get("chunks", 0),
+                            "Chars": v.get("chars", 0),
+                            "Avg chunk len": v.get("avg_chunk_len", 0),
+                        }
+                        for k, v in sorted(pf.items(), key=lambda x: x[0].lower())
+                    ]
             st.dataframe(rows, use_container_width=True)
 
         # --- Manage files in this index ---

@@ -393,28 +393,42 @@ def build_index_from_files(
     )
 
     stats = {
-    "num_docs": len(docs),
-    "num_chunks": len(chunks),
-    "sources": list({d.metadata.get("source", "unknown") for d in docs}),
-    "skipped_files": skipped,
-    "per_file": {}
+        "num_docs": len(docs),
+        "num_chunks": len(chunks),
+        "sources": list({d.metadata.get("source", "unknown") for d in docs}),
+        "skipped_files": skipped,
+        "per_file": {}
     }
 
-    # Count pages and chunks per file
+    # --- Extra stats ---
+    total_chars = sum(len(ch.page_content or "") for ch in chunks)
+    avg_chunk_len = round(total_chars / stats["num_chunks"], 1) if stats["num_chunks"] else 0
+
+    stats["total_chars"] = total_chars
+    stats["avg_chunk_len"] = avg_chunk_len
+
+    # Count pages, chunks, and chars per file
     page_count = defaultdict(set)
     chunk_count = defaultdict(int)
+    char_count = defaultdict(int)
     for d in chunks:
         src = d.metadata.get("source", "unknown")
         pg = d.metadata.get("page", None)
         if pg:
             page_count[src].add(pg)
         chunk_count[src] += 1
+        char_count[src] += len(d.page_content or "")
 
     for src in stats["sources"]:
+        c = chunk_count.get(src, 0)
+        total_c = char_count.get(src, 0)
         stats["per_file"][src] = {
             "pages": len(page_count[src]) if src in page_count else 1,
-            "chunks": chunk_count[src],
+            "chunks": c,
+            "chars": total_c,
+            "avg_chunk_len": round(total_c / c, 1) if c else 0,
         }
+
 
     # Attach persist_dir and write a manifest next to the vectors
     stats["persist_dir"] = persist_dir
@@ -428,7 +442,6 @@ def build_index_from_files(
         },
     )
     return vs, stats
-
 
 # --- Index management (fresh dir + manifest) ---
 def make_fresh_index_dir(base_dir: str) -> str:
@@ -454,8 +467,11 @@ def write_manifest(persist_dir: str, stats: dict, params: dict | None = None):
         "num_chunks": stats.get("num_chunks", 0),
         "sources": stats.get("sources", []),
         "per_file": stats.get("per_file", {}),
+        "total_chars": stats.get("total_chars", 0),
+        "avg_chunk_len": stats.get("avg_chunk_len", 0),
         "params": params or {},
     }
+
     try:
         with open(_manifest_path(persist_dir), "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)

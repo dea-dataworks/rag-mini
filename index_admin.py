@@ -62,18 +62,36 @@ def recount_stats(vs) -> dict:
         if pg:
             page_set.setdefault(src, set()).add(pg)
 
+    char_count = {}
+    for d in docs:
+        src = (d.metadata or {}).get("source", "unknown")
+        char_count[src] = char_count.get(src, 0) + len(d.page_content or "")
+
     for src, c in chunk_count.items():
+        total_c = char_count.get(src, 0)
         per_file[src] = {
             "pages": len(page_set.get(src, {1})) if page_set.get(src) else 1,
             "chunks": c,
+            "chars": total_c,
+            "avg_chunk_len": round(total_c / c, 1) if c else 0,
         }
+
+
+    total_chars = 0
+    for d in docs:
+        total_chars += len(d.page_content or "")
+
+    avg_chunk_len = round(total_chars / sum(chunk_count.values()), 1) if chunk_count else 0
 
     return {
         "num_docs": len(per_file),
         "num_chunks": sum(chunk_count.values()) if chunk_count else 0,
         "sources": sorted(per_file.keys()),
         "per_file": per_file,
+        "total_chars": total_chars,
+        "avg_chunk_len": avg_chunk_len,
     }
+
 
 def rebuild_manifest_from_vs(persist_dir: str, vs, params: dict | None = None) -> dict:
     """
