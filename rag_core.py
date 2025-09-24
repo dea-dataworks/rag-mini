@@ -204,9 +204,10 @@ def files_to_documents(uploaded_files) -> Tuple[List[Document], List[str]]:
 def chunk_documents(docs, size: int, overlap: int):
     """
     Split Documents into overlapping chunks.
+    Assign a deterministic chunk_id per (source[, page]) and per-chunk index.
     - size: target characters per chunk (e.g., 800)
     - overlap: shared chars between neighboring chunks (e.g., 120)
-    Returns a new list[Document] (each chunk keeps metadata).
+    Returns a new list[Document] (each chunk keeps/enriches metadata).
     """
     if not docs:
         return []
@@ -216,7 +217,30 @@ def chunk_documents(docs, size: int, overlap: int):
         chunk_overlap=overlap,
         separators=["\n\n", "\n", " ", ""],  # coarse → fine
     )
-    return splitter.split_documents(docs)
+
+    out = []
+    for doc in docs:
+        parts = splitter.split_documents([doc])
+        # Build stable IDs scoped to this source and (optional) page
+        src = (doc.metadata or {}).get("source", "unknown")
+        page = (doc.metadata or {}).get("page", None)
+
+        for i, ch in enumerate(parts, start=1):
+            md = dict(ch.metadata or {})
+            # Keep page exactly as original (None for DOCX; 1 for TXT; actual page for PDF)
+            # Deterministic ID: source + optional page + chunk counter
+            id_mid = f"p{page}::" if page is not None else ""
+            cid = f"{src}::{id_mid}c{i}"
+
+            md["chunk_index"] = i
+            md["chunk_id"] = cid
+            # Also provide 'id' for broader compatibility with some tooling
+            md.setdefault("id", cid)
+
+            ch.metadata = md
+            out.append(ch)
+
+    return out
 
 def get_embeddings(model_name: str):
     """Return an OllamaEmbeddings instance."""
@@ -278,6 +302,7 @@ def make_chunk_rows(pairs, snippet_len: int = 240):
             "Score": f"{score:.4f}" if isinstance(score, (float, int)) else "—",
             "File": meta.get("source", "unknown"),
             "Page": meta.get("page", ""),
+            "Chunk ID": meta.get("chunk_id") or meta.get("id"),
             "Snippet": snippet,
         })
     return rows

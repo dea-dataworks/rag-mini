@@ -511,7 +511,12 @@ if preview_btn:
 
             st.markdown("### Retrieved Chunks")
             for i, d in enumerate(docs_only, start=1):
-                with st.expander(f"Chunk {i} — {d.metadata.get('source','unknown')} p.{d.metadata.get('page','')}"):
+                m = d.metadata or {}
+                src = m.get("source", "unknown")
+                pg  = m.get("page", None)
+                cid = m.get("chunk_id") or m.get("id")
+                hdr = f"Chunk {i} — {src}" + (f" p.{pg}" if pg else "") + (f"  [{cid}]" if cid else "")
+                with st.expander(hdr):
                     st.write(d.page_content)
 
 
@@ -698,10 +703,13 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     m = d.metadata or {}
                     src = m.get("source", "unknown")
                     pg  = m.get("page", None)
-                    header = f"{src} p.{pg}" if pg else src
+                    cid = m.get("chunk_id") or m.get("id")
+                    header = f"{src}" + (f" p.{pg}" if pg else "")
+                    if cid:
+                        header += f"  [{cid}]"
                     st.markdown(f"**Chunk {i} — {header}**")
                     st.write(d.page_content)
-            
+                       
             st.markdown("### Chat (History)")
 
             hist = st.session_state.get("chat_history", [])
