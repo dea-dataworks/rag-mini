@@ -16,6 +16,8 @@ DEFAULT_SETTINGS = {
     "guardrails_enabled": True,     # feature flag (UI can honor this)
     "guardrails_strict": False,     # if True, decline on warnings; else warn-first
     "min_context_chars": 40,        # thin-context threshold for 'has context'
+    # --- index selection (non-secret UI pref) ---
+    "index_name": "user",
 }
 
 def load_settings():
@@ -61,6 +63,7 @@ def apply_persisted_defaults(st):
     st.session_state.setdefault("GUARDRAILS_ENABLED", bool(_lc.get("guardrails_enabled", True)))
     st.session_state.setdefault("GUARDRAILS_STRICT", bool(_lc.get("guardrails_strict", False)))
     st.session_state.setdefault("GUARDRAILS_MIN_CONTEXT_CHARS", int(_lc.get("min_context_chars", 40)))
+    st.session_state.setdefault("INDEX_NAME", _lc.get("index_name", "user"))
 
 # --- Provenance / export config ---
 
@@ -79,6 +82,8 @@ EXPORTABLE_SETTINGS = [
     "guardrails_enabled",
     "guardrails_strict",
     "min_context_chars",
+    # --- index name (non-secret) ---
+    "index_name",
 ]
 
 def get_exportable_settings(session_state) -> dict:
@@ -100,6 +105,9 @@ def get_exportable_settings(session_state) -> dict:
         "guardrails_enabled": session_state.get("GUARDRAILS_ENABLED"),
         "guardrails_strict": session_state.get("GUARDRAILS_STRICT"),
         "min_context_chars": session_state.get("GUARDRAILS_MIN_CONTEXT_CHARS"),
+        # --- NEW: selected base name for index ---
+        "index_name": session_state.get("INDEX_NAME"),
     }
+
     return mapping
 
