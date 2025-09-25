@@ -616,12 +616,6 @@ with st.container(border=True):
 
                     st.markdown("### Answer")
 
-                # # Quick copy buttons (utils.ui)
-                # tags = build_citation_tags(docs_only) if docs_only else []
-                # render_copy_row(answer_text, "; ".join(tags))
-                # if tags:
-                #     st.caption("Sources: " + "; ".join(tags))
-
                 # Quick copy buttons (utils.ui) — build once, reuse
                 tags = build_citation_tags(docs_only) if docs_only else []
                 sources_line = "; ".join(tags) if tags else ""
