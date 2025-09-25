@@ -18,6 +18,9 @@ from rag_core import (
     read_pdf_pages, read_docx, read_txt,
     chunk_documents,
     write_manifest,
+    # Index pointer helpers + constants
+    PERSIST_DIR,
+    read_active_pointer, save_active_pointer, find_latest_index_dir,
 )
 
 # ---------- Public API ----------
@@ -137,3 +140,57 @@ def add_or_replace_file(
     # 3) add to existing vs
     vs.add_documents(chunks)
     return del_ok, len(chunks)
+
+# ---------- Index pointer API (new) ----------
+
+def normalize_base(root: str, name: str) -> str:
+    """
+    Join the vector root with a base name.
+    name="" means the root itself (default base).
+    """
+    name = (name or "").strip()
+    return os.path.join(root, name) if name else root
+
+
+def list_indexes(root: str = PERSIST_DIR) -> list[str]:
+    """
+    Return immediate subfolder names under the vector root that look like bases.
+    Hidden folders and files are ignored.
+    """
+    try:
+        entries = os.listdir(root)
+    except FileNotFoundError:
+        return []
+
+    out = []
+    for e in entries:
+        if e.startswith("."):
+            continue
+        full = os.path.join(root, e)
+        if os.path.isdir(full):
+            out.append(e)
+    return sorted(out)
+
+
+def index_exists(name: str, root: str = PERSIST_DIR) -> bool:
+    """Whether a base folder exists under the root."""
+    return os.path.isdir(normalize_base(root, name))
+
+
+def get_active_index(base: str | None = None) -> str | None:
+    """
+    Given a base folder path (e.g., rag_store/user), return the active sub-index folder.
+    Falls back to the latest timestamped index if no pointer exists.
+    """
+    base = base or PERSIST_DIR
+    pointer = read_active_pointer(base)
+    if pointer:
+        return pointer
+    return find_latest_index_dir(base)
+
+
+def set_active_index(base: str, active_dir: str) -> None:
+    """
+    Persist the active sub-index pointer for a base.
+    """
+    save_active_pointer(base, active_dir)
