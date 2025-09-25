@@ -280,3 +280,21 @@ def render_provider_fallback_toast(reason: str, from_provider: str, to_provider:
     if reason:
         msg += f" ({reason})"
     st.info(msg)
+
+# --- Index switcher helpers ---
+
+def render_index_switcher_header():
+    """
+    Small, consistent header for the Index switcher block.
+    """
+    st.markdown("**Active index (base)**")
+    st.caption("Switch among named bases under `rag_store/`. "
+               "Each base can hold multiple timestamped sub-indexes.")
+
+def render_index_switched(prev: str | None, new: str | None):
+    """
+    One-liner toast when the user switches the base/index.
+    """
+    prev_lbl = (prev or "default")
+    new_lbl = (new or "default")
+    st.info(f"Active index switched: `{prev_lbl}` → `{new_lbl}`")
