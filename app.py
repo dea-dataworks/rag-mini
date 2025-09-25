@@ -371,8 +371,51 @@ with st.container(border=True):
     build_btn = st.button("Build / Load Index", type="primary", use_container_width=True, help="Create a fresh index or load the last active one.")
 
     if build_btn:
-        # (keep your existing build/load logic here unchanged)
-        ...
+        active_dir = None
+        vs_new = None
+
+        if rebuild_from_uploads:
+            if not uploaded_files:
+                st.warning("Upload at least one file to rebuild an index.")
+            else:
+                with st.spinner("Building a fresh index…"):
+                    try:
+                        # Each build creates a fresh timestamped subfolder under BASE_DIR
+                        active_dir = make_fresh_index_dir(base_dir)
+                        vs_new = build_index_from_files(
+                            files=uploaded_files,
+                            persist_dir=active_dir,
+                            embed_model=EMBED_MODEL,
+                            chunk_size=st.session_state.get("CHUNK_SIZE", 800),
+                            chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
+                        )
+                    except Exception as e:
+                        st.error(f"Build failed: {e}")
+                        active_dir = None
+                        vs_new = None
+        else:
+            with st.spinner("Loading last active index…"):
+                from rag_core import read_active_pointer, find_latest_index_dir
+                pointer = read_active_pointer(base_dir) or find_latest_index_dir(base_dir)
+                if pointer:
+                    active_dir = pointer
+                    vs_new = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=pointer)
+
+        if vs_new is not None and active_dir:
+            st.session_state["vs"] = vs_new
+            st.session_state["ACTIVE_INDEX_DIR"] = active_dir
+            from rag_core import save_active_pointer
+            save_active_pointer(base_dir, active_dir)
+
+            try:
+                set_active_index(base=base_dir, active_dir=active_dir)
+            except Exception:
+                pass
+
+            st.success("Index ready.")
+        else:
+            st.warning("No index loaded. If you expected a load, check the base folder or rebuild from uploads.")
+
     
     # --- Inspector + Manage files (collapsed) ---
     with st.expander("Index Inspector & Manage files", expanded=False):
@@ -382,6 +425,7 @@ with st.container(border=True):
         else:
             st.caption(f"Active index path: `{active_dir}`")
             mf = read_manifest(active_dir)
+            
             if mf:
                 st.write(
                     f"**Built:** {mf.get('timestamp','?')} — "
@@ -389,10 +433,51 @@ with st.container(border=True):
                     f"**Chunks:** {mf.get('num_chunks',0)} — "
                     f"**Avg chunk len:** {mf.get('avg_chunk_len',0)} chars"
                 )
-                # (keep the mismatch warning + per_file table + manage files logic here)
-                ...
+
+                # Simple per-file table
+                per_file = (mf.get("per_file") or [])
+                if per_file:
+                    rows = []
+                    for f in per_file:
+                        rows.append({
+                            "source": f.get("source", ""),
+                            "pages": f.get("pages", None),
+                            "chunks": f.get("chunks", 0),
+                            "size_kb": round((f.get("bytes", 0) or 0) / 1024, 1),
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+                st.markdown("**Manage files**")
+                c1, c2 = st.columns([1, 1])
+
+                with c1:
+                    del_src = st.text_input("Delete by exact source name", placeholder="e.g., sample_data/udhr.pdf")
+                    if st.button("Delete source", use_container_width=True, disabled=(not del_src)):
+                        try:
+                            deleted = delete_source(active_dir, del_src)
+                            if deleted:
+                                st.success(f"Deleted: {del_src}")
+                                rebuild_manifest_from_vs(active_dir)
+                            else:
+                                st.info("Nothing deleted (check the source name).")
+                        except Exception as e:
+                            st.error(f"Delete failed: {e}")
+
+                with c2:
+                    rep_file = st.file_uploader("Add/replace a file", type=["pdf","txt","docx"], accept_multiple_files=False, key="replace_file")
+                    if rep_file and st.button("Add / Replace", use_container_width=True):
+                        try:
+                            added = add_or_replace_file(active_dir, rep_file)
+                            if added:
+                                st.success(f"Added/replaced: {rep_file.name}")
+                                rebuild_manifest_from_vs(active_dir)
+                            else:
+                                st.info("No change applied.")
+                        except Exception as e:
+                            st.error(f"Add/replace failed: {e}")
             else:
                 st.info("No manifest found for the active index. Rebuild to generate one.", icon="ℹ️")
+
 
 # ---------- STEP 3: Q&A ----------
 with st.container(border=True):
