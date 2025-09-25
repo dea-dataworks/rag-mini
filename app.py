@@ -250,28 +250,6 @@ with st.sidebar:
         st.session_state["BASE_DIR"] = base_dir
         st.caption(f"Active base: `{base_dir}`")
 
-# # ---------- FILE UPLOAD ----------
-# # create a resettable key so we can clear the uploader after a build
-# if "UPLOAD_KEY" not in st.session_state:
-#     st.session_state["UPLOAD_KEY"] = 0
-
-# uploaded_files = st.file_uploader(
-#     "Upload .pdf, .txt, or .docx",
-#     type=["pdf", "txt", "docx"],
-#     accept_multiple_files=True,
-#     key=f"uploader_{st.session_state['UPLOAD_KEY']}",
-# )
-
-# # --- UX note for PDFs (images/tables not parsed yet) ---
-# render_pdf_limit_note_for_uploads(uploaded_files)
-
-# # small control to clear uploads without restarting
-# clear_col, _ = st.columns([1, 3])
-# with clear_col:
-#     if st.button("Clear uploads"):
-#         st.session_state["UPLOAD_KEY"] += 1  # re-key the widget -> clears files
-#         st.rerun()
-
 # ---------- STEP 1: UPLOAD DOCUMENTS ----------
 with st.container(border=True):
     st.subheader("1) Upload documents")
@@ -293,14 +271,6 @@ with st.container(border=True):
     if st.button("Clear uploads", use_container_width=True):
         st.session_state["UPLOAD_KEY"] += 1
         st.rerun()
-
-    # c1, c2, c3 = st.columns([2, 1, 2])
-    # with c2:
-    #     if st.button("Clear uploads"):
-    #         st.session_state["UPLOAD_KEY"] += 1
-    #         st.rerun()
-
-
 
 # ---------- STEP 2: MANAGE INDEX ----------
 with st.container(border=True):
@@ -331,13 +301,15 @@ with st.container(border=True):
         try:
             st.cache_data.clear()
             st.cache_resource.clear()
-        except Exception:
-            pass
+        except Exception as e:
+            if st.session_state.get("SHOW_DEBUG"):
+                st.caption(f"[Debug] Cache clear failed: {e}")
         try:
             from llm_chain import invalidate_chain_cache
             invalidate_chain_cache()
-        except Exception:
-            pass
+        except Exception as e:
+            if st.session_state.get("SHOW_DEBUG"):
+                st.caption(f"[Debug] LLM chain cache invalidation failed: {e}")
         from rag_core import read_active_pointer, find_latest_index_dir, save_active_pointer, load_vectorstore_if_exists
         pointer = read_active_pointer(new_base_dir) or find_latest_index_dir(new_base_dir)
         if pointer:
@@ -415,7 +387,6 @@ with st.container(border=True):
         else:
             st.warning("No index loaded. If you expected a load, check the base folder or rebuild from uploads.")
 
-    
     # --- Inspector + Manage files (collapsed) ---
     with st.expander("Index Inspector & Manage files", expanded=False):
         active_dir = st.session_state.get("ACTIVE_INDEX_DIR")
@@ -476,7 +447,6 @@ with st.container(border=True):
                             st.error(f"Add/replace failed: {e}")
             else:
                 st.info("No manifest found for the active index. Rebuild to generate one.", icon="ℹ️")
-
 
 # ---------- STEP 3: Q&A ----------
 with st.container(border=True):
@@ -646,12 +616,18 @@ with st.container(border=True):
 
                     st.markdown("### Answer")
 
-                # Quick copy buttons (utils.ui)
-                tags = build_citation_tags(docs_only) if docs_only else []
-                render_copy_row(answer_text, "; ".join(tags))
-                if tags:
-                    st.caption("Sources: " + "; ".join(tags))
+                # # Quick copy buttons (utils.ui)
+                # tags = build_citation_tags(docs_only) if docs_only else []
+                # render_copy_row(answer_text, "; ".join(tags))
+                # if tags:
+                #     st.caption("Sources: " + "; ".join(tags))
 
+                # Quick copy buttons (utils.ui) — build once, reuse
+                tags = build_citation_tags(docs_only) if docs_only else []
+                sources_line = "; ".join(tags) if tags else ""
+                render_copy_row(answer_text, sources_line)
+                if sources_line:
+                    st.caption("Sources: " + sources_line)
 
                 # Optional badge about sanitization
                 if sanitize_stats.get("lines_dropped", 0) > 0:
@@ -730,8 +706,8 @@ with st.container(border=True):
                         # Provider provenance for the turn
                         "provider_selected": provider_selected,
                         "provider_used": provider_used,
-                        "fallback": bool((qa.get("meta", {}) or {}).get("fallback", False)),
-                        "fallback_reason": (qa.get("meta", {}) or {}).get("fallback_reason"),
+                        "fallback": bool(llm_meta.get("fallback", False)),
+                        "fallback_reason": llm_meta.get("reason"),
                         "guardrail_primary_status": qa.get(
                             "guardrail_primary_status",
                             {"code": "ok", "severity": "info", "message": "OK"}
@@ -803,7 +779,6 @@ with st.container(border=True):
                             disabled=not has_history,
                         )
 
-
                 st.divider()
                 st.caption(
                     "Follow-up question (reuses the same retriever). "
@@ -835,7 +810,7 @@ with st.container(border=True):
                         st.rerun()
 
 # ---------- EVAL SNAPSHOT (Retrieval-only) ----------
-with st.expander("Evaluation — dev only (retrieval hit@k & MRR)", expanded=False):
+with st.expander("Evaluation (retrieval quality)", expanded=False):
     st.info("For development: evaluates retrieval only (no LLM) using eval/qa.jsonl. Matches filename + page if provided.", icon="🛠️")
 
     c1, c2, c3 = st.columns([1, 1, 1])
