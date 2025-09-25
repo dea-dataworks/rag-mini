@@ -32,28 +32,8 @@ st.set_page_config(page_title="RAG Mini", layout="wide")
 seed_session_from_settings(st)
 apply_persisted_defaults(st)
 st.title(APP_TITLE)
-st.caption("Your files are chunked, embedded, and indexed for retrieval. Answers cite the top-scored chunks.")
-st.caption("Flow: **Upload → Build/Load → Ask**.")
+st.caption("○ Your files are chunked, embedded, and indexed for retrieval. ○ Answers cite the top-scored chunks. ○ Flow: Upload → Build/Load → Ask")
 
-# with st.expander("**Quick start**", expanded=True):
-#     st.markdown(
-#         """
-#         1. **Upload docs** (`.pdf` / `.txt` / `.docx`)
-#            - PDF limitation: only text layer is parsed (no images/tables).
-#         2. **Build / Load Index**
-#            - Turn **Rebuild from uploads** ON → fresh index.
-#            - Leave it OFF → load last active index.
-#         3. **Ask & Cite**
-#            - Enter your question → get an answer with sources below.
-#         """
-#     )
-
-# with st.expander("**Quick start**", expanded=True):
-#     st.markdown("""
-#     1. **Upload docs** (`.pdf` / `.txt` / `.docx`)
-#     2. **Build / Load Index**
-#     3. **Ask a question** and see cited sources
-#     """)
 
 
 # ---------- SESSION DEFAULTS ----------
