@@ -1,28 +1,16 @@
-"""
-Lightweight, optional maintenance helpers for a built Chroma index:
-- list_sources_in_vs(vs)
-- delete_source(vs, source)
-- recount_stats(vs)
-- rebuild_manifest_from_vs(persist_dir, vs, params)
-- add_or_replace_file(vs, uploaded_file, embed_model, chunk_size, chunk_overlap)
-"""
-
 from typing import List, Tuple
 import os
-
 from langchain_core.documents import Document
 
-# Reuse your own helpers from rag_core (no duplication).
 from rag_core import (
     _get_all_docs_from_chroma,   # full-corpus read (best-effort)
     read_pdf_pages, read_docx, read_txt,
     chunk_documents,
     write_manifest,
     # Index pointer helpers + constants
-    PERSIST_DIR,
     read_active_pointer, save_active_pointer, find_latest_index_dir,
 )
-
+from utils.settings import PERSIST_DIR
 # ---------- Public API ----------
 
 def list_sources_in_vs(vs) -> list[str]:

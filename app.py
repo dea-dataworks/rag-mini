@@ -10,10 +10,10 @@ from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filt
 from guardrails import sanitize_chunks, pick_primary_status
 from index_admin import (
     list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs,
-    list_indexes,  # NEW: names like ["user", "demo-A", "demo-B"]
-    get_active_index, set_active_index  # NEW: pointer helpers (per base)
+    list_indexes,  
+    get_active_index, set_active_index  
 )
-from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
+from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults, PERSIST_DIR
 from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
                     render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
                     render_dev_metrics, render_session_export, get_exportable_settings, render_guardrail_banner,
@@ -25,7 +25,6 @@ from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOU
 
 # ---------- CONFIG ----------
 APP_TITLE = "RAG Mini"
-PERSIST_DIR = "rag_store"  
 EMBED_MODEL = "nomic-embed-text"
 
 st.set_page_config(page_title="RAG Mini", layout="wide")

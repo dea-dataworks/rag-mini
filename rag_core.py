@@ -8,6 +8,7 @@ from docx import Document as DocxDocument
 from collections import defaultdict  
 import io, os, re, math, json, time
 from utils.helpers import compute_score_stats
+from utils.settings import PERSIST_DIR
 from guardrails import evaluate_guardrails, pick_primary_status
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
@@ -419,8 +420,7 @@ def build_index_from_files(
         embedding=embedding,
         persist_dir=persist_dir,
     )
-    vs._persist_directory = persist_dir
-
+    
     stats = {
         "num_docs": len(docs),
         "num_chunks": len(chunks),

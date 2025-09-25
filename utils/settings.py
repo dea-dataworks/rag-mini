@@ -1,5 +1,7 @@
 import json, os
 
+PERSIST_DIR = os.getenv("RAG_PERSIST_DIR", "rag_store")
+
 SETTINGS_PATH = "settings.json"
 DEFAULT_SETTINGS = {
     "chunk_size": 800,
