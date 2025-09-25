@@ -1,6 +1,7 @@
 from typing import Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from guardrails import GUARDRAIL_SYSTEM, has_citation, FALLBACK_NO_CITATION
+from rag_core import load_vectorstore_if_exists, retrieve
 
 # helper to compress prior turns for prompt conditioning
 from typing import List, Dict
@@ -161,4 +162,136 @@ def call_llm(
         },
     }
 
+# ========== Index-aware retriever factory (cacheable) ==========
 
+# cache by persist_dir so switching base/index rebinds cleanly
+_CHAIN_CACHE = {}  # key: persist_dir -> {"cfg": {...}, "run": callable}
+
+def invalidate_chain_cache(persist_dir: Optional[str] = None) -> None:
+    """
+    Clear the cached chain(s).
+    - If persist_dir is given, drop only that entry.
+    - If None, drop all entries.
+    Call this when the active index changes.
+    """
+    if persist_dir:
+        _CHAIN_CACHE.pop(persist_dir, None)
+    else:
+        _CHAIN_CACHE.clear()
+
+
+def _make_context(docs, max_chars: int = 3200) -> str:
+    """
+    Build a plain text context from retrieved docs. Keep it simple & compact.
+    """
+    parts = []
+    total = 0
+    for d in docs:
+        txt = (d.page_content or "").strip().replace("\n", " ")
+        if not txt:
+            continue
+        # annotate minimal provenance inline to help citation behavior
+        m = d.metadata or {}
+        src = m.get("source", "file")
+        pg  = m.get("page", None)
+        head = f"[{src}{f' p.{pg}' if pg else ''}] "
+        piece = (head + txt)
+        if total + len(piece) > max_chars:
+            remain = max_chars - total
+            if remain <= 0:
+                break
+            piece = piece[:remain] + "…"
+        parts.append(piece)
+        total += len(piece)
+        if total >= max_chars:
+            break
+    return "\n\n".join(parts)
+
+
+def get_or_build_chain(
+    *,
+    persist_dir: str,
+    embed_model: str,
+    provider: str = "ollama",
+    model_name: str = "mistral",
+    temperature: float = 0.2,
+    openai_api_key: Optional[str] = None,
+    retrieval_mode: str = "dense",   # "dense" | "hybrid" | "bm25"
+    k: int = 4,
+    mmr_lambda: float = 0.7,
+):
+    """
+    Returns a callable: run(question, chat_history=None, use_history=False) -> dict
+    The callable performs: retrieve -> build prompt -> call LLM.
+    Cached per 'persist_dir' so switching indices rebinds the chain.
+    """
+    cfg = {
+        "provider": (provider or "ollama").lower(),
+        "model_name": model_name,
+        "temperature": float(temperature),
+        "retrieval_mode": retrieval_mode,
+        "k": int(k),
+        "mmr_lambda": float(mmr_lambda),
+        "embed_model": embed_model,
+    }
+
+    # Cache hit with identical config
+    cached = _CHAIN_CACHE.get(persist_dir)
+    if cached and cached.get("cfg") == cfg:
+        return cached["run"]
+
+    # Build (or open) vectorstore bound to this persist_dir
+    vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=persist_dir)
+    if vs is None:
+        # Create a "cold" runner that returns a guardrail message if index is missing
+        def run_missing(question: str, chat_history=None, use_history: bool = False):
+            return {
+                "text": "No active index is loaded for this selection. Build or load an index first.",
+                "pairs": [],
+                "docs": [],
+                "meta": {"provider_used": None, "fallback": False, "reason": "no_index"},
+            }
+        _CHAIN_CACHE[persist_dir] = {"cfg": cfg, "run": run_missing}
+        return run_missing
+
+    def _run(question: str, chat_history=None, use_history: bool = False):
+        # 1) retrieve
+        pairs = retrieve(
+            vs=vs,
+            query=question,
+            k=cfg["k"],
+            mmr_lambda=cfg["mmr_lambda"],
+            mode=cfg["retrieval_mode"],
+        )
+        docs = [d for (d, _s) in pairs]
+
+        # 2) build prompt (history optional, never treated as evidence)
+        context = _make_context(docs)
+        prompt = build_prompt(
+            context=context,
+            question=question,
+            chat_history=chat_history or [],
+            use_history=bool(use_history),
+            max_history_turns=4,
+        )
+
+        # 3) call LLM (provider with graceful fallback already handled)
+        out = call_llm(
+            prompt=prompt,
+            provider=cfg["provider"],
+            model_name=cfg["model_name"],
+            openai_api_key=openai_api_key,
+            temperature=cfg["temperature"],
+        )
+        # Normalize to dict with text/meta
+        if isinstance(out, str):
+            payload = {"text": out, "meta": {"provider_used": cfg["provider"], "fallback": False, "reason": None}}
+        else:
+            payload = out
+
+        # include retrieval artifacts so the caller can build exports/stats
+        payload.update({"pairs": pairs, "docs": docs})
+        return payload
+
+    _CHAIN_CACHE[persist_dir] = {"cfg": cfg, "run": _run}
+    return _run
