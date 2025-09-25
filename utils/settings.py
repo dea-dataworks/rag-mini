@@ -22,7 +22,8 @@ DEFAULT_SETTINGS = {
     "index_name": "user",
 }
 
-def load_settings():
+def load_settings() -> dict:
+    """Load settings.json merged over DEFAULT_SETTINGS. Safe on decode errors."""
     if os.path.exists(SETTINGS_PATH):
         try:
             with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
@@ -32,10 +33,10 @@ def load_settings():
             pass
     return DEFAULT_SETTINGS.copy()
 
-def save_settings(d: dict):
+def save_settings(d: dict) -> None:
     """
-    Persist only the known, safe settings (no secrets).
-    Anything not in DEFAULT_SETTINGS is ignored on save.
+    Persist only keys present in DEFAULT_SETTINGS (no secrets).
+    Unknown keys are ignored.
     """
     safe = {k: d.get(k, DEFAULT_SETTINGS[k]) for k in DEFAULT_SETTINGS}
     with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
@@ -69,24 +70,24 @@ def apply_persisted_defaults(st):
 
 # --- Provenance / export config ---
 
-# Keys we explicitly consider part of run_settings provenance.
-EXPORTABLE_SETTINGS = [
-    "model",
-    "provider",
-    "top_k",
-    "retrieval_mode",
-    "chunk_size",
-    "chunk_overlap",
-    "mmr_lambda",
-    "use_history",
-    "max_history_turns",
-    # --- NEW (optional in exports) ---
-    "guardrails_enabled",
-    "guardrails_strict",
-    "min_context_chars",
-    # --- index name (non-secret) ---
-    "index_name",
-]
+# # Keys we explicitly consider part of run_settings provenance.
+# EXPORTABLE_SETTINGS = [
+#     "model",
+#     "provider",
+#     "top_k",
+#     "retrieval_mode",
+#     "chunk_size",
+#     "chunk_overlap",
+#     "mmr_lambda",
+#     "use_history",
+#     "max_history_turns",
+#     # --- NEW (optional in exports) ---
+#     "guardrails_enabled",
+#     "guardrails_strict",
+#     "min_context_chars",
+#     # --- index name (non-secret) ---
+#     "index_name",
+# ]
 
 def get_exportable_settings(session_state) -> dict:
     """
