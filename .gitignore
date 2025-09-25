@@ -10,3 +10,8 @@ venv/
 .cache/
 .streamlit/
 rag_store/
+
+# pytest / Python cache
+.pytest_cache/
+__pycache__/
+**/__pycache__/
