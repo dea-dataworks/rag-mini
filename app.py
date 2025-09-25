@@ -9,10 +9,9 @@ from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filt
                       make_fresh_index_dir, read_manifest)
 from guardrails import sanitize_chunks, pick_primary_status
 from index_admin import (
-    list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs,
+    delete_source, add_or_replace_file, rebuild_manifest_from_vs,
     list_indexes,  
-    get_active_index, set_active_index  
-)
+    set_active_index)
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults, PERSIST_DIR
 from utils.ui import (render_export_buttons, render_copy_row , render_cited_chunks_expander,
                     render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
@@ -647,24 +646,18 @@ with st.container(border=True):
 
                     st.markdown("### Answer")
 
-
                 # Quick copy buttons (utils.ui)
-                try:
-                    citations_str = "; ".join(build_citation_tags(docs_only)) if docs_only else ""
-                except Exception:
-                    citations_str = ""
+                tags = build_citation_tags(docs_only) if docs_only else []
+                render_copy_row(answer_text, "; ".join(tags))
+                if tags:
+                    st.caption("Sources: " + "; ".join(tags))
 
-                render_copy_row(answer_text, citations_str)
 
                 # Optional badge about sanitization
                 if sanitize_stats.get("lines_dropped", 0) > 0:
                     st.caption(f"Sanitized: {sanitize_stats['lines_dropped']} line(s) in "
                             f"{sanitize_stats['chunks_with_drops']} chunk(s).")
 
-                # --- Citations (dedup + page-anchored) ---
-                tags = build_citation_tags(docs_only)
-                if tags:
-                    st.caption("Sources: " + "; ".join(tags))
 
                 # === Build QA payload (for exports/history) ===
                 try:
