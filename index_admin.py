@@ -7,9 +7,10 @@ from rag_core import (
     read_pdf_pages, read_docx, read_txt,
     chunk_documents,
     write_manifest,
-    # Index pointer helpers + constants
+    load_vectorstore_if_exists,
     read_active_pointer, save_active_pointer, find_latest_index_dir,
 )
+
 from utils.settings import PERSIST_DIR
 # ---------- Public API ----------
 
@@ -18,11 +19,18 @@ def list_sources_in_vs(vs) -> list[str]:
     docs = _get_all_docs_from_chroma(vs)
     return sorted({(d.metadata or {}).get("source", "unknown") for d in docs})
 
-def delete_source(vs, source: str) -> bool:
+def delete_source(persist_dir_or_vs, source: str, *, embed_model: str = "nomic-embed-text") -> bool:
     """
     Delete all chunks whose metadata.source == source.
+    Accepts either a vectorstore object or a persist_dir path.
     Returns True if, after the call, no chunks with that source remain.
     """
+    vs = persist_dir_or_vs
+    if isinstance(persist_dir_or_vs, str):
+        vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=persist_dir_or_vs)
+    if vs is None:
+        return False
+
     try:
         vs.delete(where={"source": source})
     except Exception:
@@ -84,26 +92,39 @@ def recount_stats(vs) -> dict:
     }
 
 
-def rebuild_manifest_from_vs(persist_dir: str, vs, params: dict | None = None) -> dict:
+def rebuild_manifest_from_vs(persist_dir: str, vs=None, *, embed_model: str = "nomic-embed-text", params: dict | None = None) -> dict:
     """
     Rewrite manifest.json based on current collection contents.
+    Accepts an optional vs; if not provided, loads from persist_dir.
     Returns the computed stats.
     """
-    stats = recount_stats(vs)
+    if vs is None:
+        vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=persist_dir)
+    stats = recount_stats(vs) if vs is not None else {
+        "num_docs": 0, "num_chunks": 0, "sources": [], "per_file": {}, "total_chars": 0, "avg_chunk_len": 0
+    }
     write_manifest(persist_dir, stats, params=params or {})
     return stats
 
 def add_or_replace_file(
-    vs,
-    uploaded_file,          # Streamlit UploadedFile-like
-    embed_model: str,       # kept for symmetry; not used directly here
-    chunk_size: int,
-    chunk_overlap: int,
+    persist_dir_or_vs,
+    uploaded_file,                  
+    *,
+    embed_model: str = "nomic-embed-text",
+    chunk_size: int = 800,
+    chunk_overlap: int = 120,
 ) -> Tuple[bool, int]:
     """
     Delete any existing chunks for this file name, then add fresh chunks from the upload.
+    Accepts either a vectorstore object or a persist_dir path.
     Returns (deleted_ok, added_chunks_count).
     """
+    vs = persist_dir_or_vs
+    if isinstance(persist_dir_or_vs, str):
+        vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=persist_dir_or_vs)
+    if vs is None:
+        return False, 0
+
     name = uploaded_file.name
     # 1) delete old
     del_ok = delete_source(vs, name)
