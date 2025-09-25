@@ -1,0 +1,1 @@
+Reinforcement learning optimizes behavior via reward signals and is applied in robotics and games.

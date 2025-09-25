@@ -10,5 +10,8 @@ python-docx>=0.8.11
 pandas>=2.0
 openpyxl>=3.1
 
+# for tests
+pytest>=8.0.0
+
 # langchain-openai
 # openai

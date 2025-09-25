@@ -1,0 +1,6 @@
+{"q": "who created python", "gold": ["doc1.txt"]}
+{"q": "data analysis library in python", "gold": ["doc2.txt"]}
+{"q": "multi dimensional arrays python", "gold": ["doc3.txt"]}
+{"q": "build web apps from python scripts", "gold": ["doc4.txt"]}
+{"q": "what is bm25", "gold": ["doc6.txt"]}
+{"q": "capital of bulgaria", "gold": ["doc7.txt"]}

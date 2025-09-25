@@ -9,7 +9,6 @@ from collections import defaultdict
 import io, os, re, math, json, time
 from utils.helpers import compute_score_stats
 from guardrails import evaluate_guardrails, pick_primary_status
-from index_admin import get_active_index, set_active_index
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
 _BM25_CACHE = {}  # key: persist_dir (str) -> SimpleBM25

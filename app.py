@@ -228,7 +228,6 @@ with st.sidebar:
             value=True,
             help="Save last-used settings to settings.json"
         )
-
         _current = {
             "chunk_size": st.session_state.get("CHUNK_SIZE", 800),
             "chunk_overlap": st.session_state.get("CHUNK_OVERLAP", 120),
@@ -240,8 +239,8 @@ with st.sidebar:
             "score_threshold": st.session_state.get("SCORE_THRESH", 0.4),
             "sanitize": st.session_state.get("SANITIZE_RETRIEVED", True),
             "debug": st.session_state.get("SHOW_DEBUG", False),
+            "index_name": st.session_state.get("INDEX_NAME", "user"),  # NEW
         }
-
         if auto_save:
             try:
                 save_settings(_current)
@@ -309,6 +308,13 @@ with st.container(border=True):
         try:
             st.cache_data.clear()
             st.cache_resource.clear()
+        except Exception:
+            pass
+
+        # Also clear any cached LLM chains bound to an old persist_dir
+        try:
+            from llm_chain import invalidate_chain_cache
+            invalidate_chain_cache()  # drop all; simple and safe
         except Exception:
             pass
 
@@ -777,6 +783,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                         "model": st.session_state.get("LLM_MODEL"),
                         "top_k": st.session_state.get("TOP_K", top_k),
                         "retrieval_mode": st.session_state.get("RETRIEVE_MODE"),
+                        "index_name": st.session_state.get("INDEX_NAME"),  # NEW
                         # Provider provenance (selected vs actually used)
                         "provider": provider_selected,
                         "provider_used": provider_used,

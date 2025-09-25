@@ -1,0 +1,1 @@
+Chroma is a vector database used in retrieval augmented generation systems for storing embeddings.
