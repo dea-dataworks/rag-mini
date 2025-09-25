@@ -1,0 +1,16 @@
+{
+  "chunk_size": 800,
+  "chunk_overlap": 120,
+  "k": 4,
+  "provider": "ollama",
+  "use_history": false,
+  "max_history_turns": 3,
+  "mmr_lambda": 0.7,
+  "score_threshold": 0.4,
+  "sanitize": true,
+  "debug": false,
+  "guardrails_enabled": true,
+  "guardrails_strict": false,
+  "min_context_chars": 40,
+  "index_name": "user"
+}

@@ -29,32 +29,17 @@ def render_copy_button(label: str, text: str, key: str | None = None):
     """
     components.html(html, height=38)
 
-def sidebar_pipeline_diagram():
-    with st.expander("📈 How it works (pipeline)"):
-        st.markdown(
-            """
-            **Ingest → Chunk → Embed → Index → Retrieve → Answer → Cite**
+# def sidebar_pipeline_diagram():
+#     with st.expander("**Instructions**", expanded=False):
+#         st.markdown(
+#             """
+#             1. Upload one or more files.
+#             2. Type your question in the box.
+#             3. Read the answer and check cited sources below.
 
-            ```
-            Upload files
-                 │
-                 ▼
-            Split into chunks (size/overlap)
-                 │
-                 ▼
-            Embed chunks → Vector store (persisted)
-                 │
-                 ▼
-            Query → BM25 + Dense (RRF/MMR)
-                 │
-                 ▼
-            Prompt LLM with top-k chunks
-                 │
-                 ▼
-            Answer + sources (filename p.X)
-            ```
-            """
-        )
+#             _Tip: Switch active indexes in the sidebar if you’ve built more than one._
+#             """
+#         )
 
 def render_export_buttons(qa: dict):
     """Render MD/CSV/Excel download buttons for a structured QA dict."""

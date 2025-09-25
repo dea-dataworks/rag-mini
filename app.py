@@ -14,7 +14,7 @@ from index_admin import (
     get_active_index, set_active_index  
 )
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults, PERSIST_DIR
-from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
+from utils.ui import (render_export_buttons, render_copy_row , render_cited_chunks_expander,
                     render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
                     render_dev_metrics, render_session_export, get_exportable_settings, render_guardrail_banner,
                     render_provider_fallback_toast)
@@ -32,8 +32,27 @@ st.set_page_config(page_title="RAG Mini", layout="wide")
 seed_session_from_settings(st)
 apply_persisted_defaults(st)
 st.title(APP_TITLE)
-st.caption("v0.2") 
-st.caption("Local, simple Retrieval-Augmented Q&A (scope-first)")
+st.caption("Your files are chunked, embedded, and indexed for retrieval. Answers cite the top-scored chunks.")
+
+# with st.expander("**Quick start**", expanded=True):
+#     st.markdown(
+#         """
+#         1. **Upload docs** (`.pdf` / `.txt` / `.docx`)
+#            - PDF limitation: only text layer is parsed (no images/tables).
+#         2. **Build / Load Index**
+#            - Turn **Rebuild from uploads** ON → fresh index.
+#            - Leave it OFF → load last active index.
+#         3. **Ask & Cite**
+#            - Enter your question → get an answer with sources below.
+#         """
+#     )
+
+with st.expander("**Quick start**", expanded=True):
+    st.markdown("""
+    1. **Upload docs** (`.pdf` / `.txt` / `.docx`)
+    2. **Build / Load Index**
+    3. **Ask a question** and see cited sources
+    """)
 
 # ---------- SESSION DEFAULTS ----------
 st.session_state.setdefault("BASE_DIR", PERSIST_DIR)       # sidebar-selected base folder
@@ -80,8 +99,6 @@ if st.session_state["vs"] is None:
 # ---------- SIDEBAR SETTINGS ----------
 with st.sidebar:
     st.header("Settings")
-    # Compact pipeline diagram (utils.ui)
-    sidebar_pipeline_diagram()
 
     # --- Regular (simple) controls ---
     embed_model   = EMBED_MODEL  # keep embeddings local (Ollama) in v0.2
@@ -95,24 +112,6 @@ with st.sidebar:
         "CHUNK_OVERLAP": int(chunk_overlap),
         "TOP_K": int(top_k),
     })
-
-    # ---- Instructions (collapsible, above Advanced) ----
-    with st.expander("Instructions", expanded=False):
-        st.markdown(
-        """
-1. **Upload docs** in the main area (`.pdf` / `.txt`).
-- **Limitation:** PDF **images and tables aren’t parsed yet** — only the text layer is indexed.
-2. **Build / Load Index**  
-   - Turn **Rebuild from current uploads** ON → creates a fresh index.  
-   - Leave it OFF → loads the last active index for the selected base folder.
-3. **Ask & Cite**  
-   - Type your question and press **Enter** (or click **Retrieve & Answer**).  
-   - Use **Preview Top Sources** to inspect retrieved chunks.
- - **Advanced:**  
-   - The app auto-loads your last active index next session.
-   - Optional: Set **Index name (suffix)** to keep separate bases (e.g., `client-a`).  
-           """
-    )
 
     # --- Advanced (foldable) ---
     with st.expander("Advanced", expanded=False):
@@ -250,27 +249,51 @@ with st.sidebar:
         st.session_state["BASE_DIR"] = base_dir
         st.caption(f"Active base: `{base_dir}`")
 
-# ---------- FILE UPLOAD ----------
-# create a resettable key so we can clear the uploader after a build
-if "UPLOAD_KEY" not in st.session_state:
-    st.session_state["UPLOAD_KEY"] = 0
+# # ---------- FILE UPLOAD ----------
+# # create a resettable key so we can clear the uploader after a build
+# if "UPLOAD_KEY" not in st.session_state:
+#     st.session_state["UPLOAD_KEY"] = 0
 
-uploaded_files = st.file_uploader(
-    "Upload .pdf, .txt, or .docx",
-    type=["pdf", "txt", "docx"],
-    accept_multiple_files=True,
-    key=f"uploader_{st.session_state['UPLOAD_KEY']}",
-)
+# uploaded_files = st.file_uploader(
+#     "Upload .pdf, .txt, or .docx",
+#     type=["pdf", "txt", "docx"],
+#     accept_multiple_files=True,
+#     key=f"uploader_{st.session_state['UPLOAD_KEY']}",
+# )
 
-# --- UX note for PDFs (images/tables not parsed yet) ---
-render_pdf_limit_note_for_uploads(uploaded_files)
+# # --- UX note for PDFs (images/tables not parsed yet) ---
+# render_pdf_limit_note_for_uploads(uploaded_files)
 
-# small control to clear uploads without restarting
-clear_col, _ = st.columns([1, 3])
-with clear_col:
-    if st.button("Clear uploads"):
-        st.session_state["UPLOAD_KEY"] += 1  # re-key the widget -> clears files
-        st.rerun()
+# # small control to clear uploads without restarting
+# clear_col, _ = st.columns([1, 3])
+# with clear_col:
+#     if st.button("Clear uploads"):
+#         st.session_state["UPLOAD_KEY"] += 1  # re-key the widget -> clears files
+#         st.rerun()
+
+# ---------- STEP 1: UPLOAD DOCUMENTS ----------
+with st.container(border=True):
+    st.subheader("1) Upload documents")
+
+    # resettable key so we can clear the uploader after a build
+    if "UPLOAD_KEY" not in st.session_state:
+        st.session_state["UPLOAD_KEY"] = 0
+
+    uploaded_files = st.file_uploader(
+        "Upload .pdf, .txt, or .docx",
+        type=["pdf", "txt", "docx"],
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state['UPLOAD_KEY']}",
+    )
+
+    # One-time UX note for PDFs
+    render_pdf_limit_note_for_uploads(uploaded_files)
+
+    c1, c2, c3 = st.columns([2, 1, 2])
+    with c2:
+        if st.button("Clear uploads"):
+            st.session_state["UPLOAD_KEY"] += 1
+            st.rerun()
 
 # ---------- INDEX SWITCHER (named bases) ----------
 # Lists named bases under rag_store/ (e.g., "user", "demo-A"). Switch updates BASE_DIR and reloads the active index pointer.
