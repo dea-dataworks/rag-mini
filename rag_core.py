@@ -8,7 +8,6 @@ from docx import Document as DocxDocument
 from collections import defaultdict  
 import io, os, re, math, json, time
 from utils.helpers import compute_score_stats
-from utils.settings import PERSIST_DIR
 from guardrails import evaluate_guardrails, pick_primary_status
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
@@ -390,12 +389,14 @@ def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
 # ---------- Functions ----------
 
 def build_index_from_files(
-    uploaded_files,
+    uploaded_files=None,
+    *,
+    files=None,
     embed_model: str,
     chunk_size: int,
     chunk_overlap: int,
     persist_dir: str,
-    embedding_obj=None,  
+    embedding_obj=None,
 ):
     """
     Orchestrator for index building:
@@ -403,14 +404,11 @@ def build_index_from_files(
       2) Split documents into chunks
       3) Get embeddings
       4) Build/load Chroma vector store and persist it
-
-    Returns:
-        vs: the Chroma vector store object
-        stats: dict with summary info
-            {'num_docs': int, 'num_chunks': int, 'sources': list[str]}
     """
+    # Back-compat: accept both 'uploaded_files' and 'files'
+    uploaded_files = uploaded_files if uploaded_files is not None else files
 
-    docs, skipped = files_to_documents(uploaded_files)
+    docs, skipped = files_to_documents(uploaded_files or [])
     chunks = chunk_documents(docs, size=chunk_size, overlap=chunk_overlap)
     
     embedding = embedding_obj or get_embeddings(embed_model)
@@ -667,25 +665,36 @@ def build_qa_result(
     )
     primary = pick_primary_status(statuses)
 
+    # Preserve selected extra meta fields if provided (provider provenance, index_name, fallback info, etc.)
+    meta_out = {
+        "model": meta.get("model"),
+        "top_k": int(meta.get("top_k", 0)),
+        "retrieval_mode": meta.get("retrieval_mode"),
+        "timestamp": meta.get("timestamp"),
+    }
+    # Optional passthroughs (don’t break if absent)
+    for key in ("index_name", "provider", "provider_used", "fallback", "fallback_reason"):
+        if key in meta:
+            meta_out[key] = meta[key]
+
+    citations = _dedup_citations(docs_used)
+
     return {
         "question": question or "",
         "answer": answer or "",
         "answer_gist": gist,
-        "citations": _dedup_citations(docs_used),
+        "citations": citations,
+        "sources": citations,  # alias for backward/side compatibility
         "chunks": chunk_rows,
         "retrieved_chunks": chunk_rows,
-        "guardrail_statuses": statuses,                 # NEW
-        "guardrail_primary_status": primary,            # NEW
-        "meta": {
-            "model": meta.get("model"),
-            "top_k": int(meta.get("top_k", 0)),
-            "retrieval_mode": meta.get("retrieval_mode"),
-            "timestamp": meta.get("timestamp"),
-        },
+        "guardrail_statuses": statuses,
+        "guardrail_primary_status": primary,
+        "meta": meta_out,
         "metrics": {
             "scores": compute_score_stats(pairs or []),
             "timings": timings or {},
         },
     }
+
 
 
