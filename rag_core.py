@@ -3,17 +3,16 @@ from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
-
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 from collections import defaultdict  
 import io, os, re, math, json, time
-
 from utils.helpers import compute_score_stats
 from guardrails import evaluate_guardrails, pick_primary_status
+from index_admin import get_active_index, set_active_index
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
-_BM25_CACHE = {}  # key: id(vs) -> SimpleBM25
+_BM25_CACHE = {}  # key: persist_dir (str) -> SimpleBM25
 
 _TOKENIZER = re.compile(r"\w+").findall
 
@@ -112,7 +111,7 @@ def _ensure_bm25_for_vs(vs, candidate_docs: List[Document] | None = None) -> Sim
     """
     if candidate_docs is not None:
         return SimpleBM25(candidate_docs)
-    key = id(vs)
+    key = getattr(vs, "_persist_directory", None) or str(id(vs))
     if key in _BM25_CACHE:
         return _BM25_CACHE[key]
     corpus = _get_all_docs_from_chroma(vs)
@@ -421,6 +420,7 @@ def build_index_from_files(
         embedding=embedding,
         persist_dir=persist_dir,
     )
+    vs._persist_directory = persist_dir
 
     stats = {
         "num_docs": len(docs),
