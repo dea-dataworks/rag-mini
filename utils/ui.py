@@ -111,7 +111,12 @@ def render_why_this_answer(qa: dict, min_items: int = 3, max_items: int = 5):
         right = f"score: {sc:.4f}" if isinstance(sc, (float, int)) else "score: —"
         st.markdown(f"- {left} — _{role}_ · {right}\n  ↳ {role_line}")
 
-def render_cited_chunks_expander(docs_only, snippet_len: int = 240):
+def render_cited_chunks_expander(
+    docs_only,
+    snippet_len: int = 240,
+    title: str = "Sources used in the answer",
+    expanded: bool = False,
+):
     """
     Compact expander that lists the cited chunks (Documents) used for the answer.
     Shows file/page and a short snippet. Pure presentation; no side effects.
@@ -119,7 +124,10 @@ def render_cited_chunks_expander(docs_only, snippet_len: int = 240):
     if not docs_only:
         return
 
-    with st.expander("Show cited chunks", expanded=False):
+    with st.expander(title, expanded=expanded):
+        # One-time PDF note inside the expander
+        render_pdf_limit_note_for_docs(docs_only)
+
         for d in docs_only:
             md = d.metadata or {}
             src = md.get("source", "unknown")

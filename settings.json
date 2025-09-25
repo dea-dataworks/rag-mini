@@ -12,5 +12,5 @@
   "guardrails_enabled": true,
   "guardrails_strict": false,
   "min_context_chars": 40,
-  "index_name": "user"
+  "index_name": "idx_20250919_145506"
 }

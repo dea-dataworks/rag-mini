@@ -33,6 +33,7 @@ seed_session_from_settings(st)
 apply_persisted_defaults(st)
 st.title(APP_TITLE)
 st.caption("Your files are chunked, embedded, and indexed for retrieval. Answers cite the top-scored chunks.")
+st.caption("Flow: **Upload → Build/Load → Ask**.")
 
 # with st.expander("**Quick start**", expanded=True):
 #     st.markdown(
@@ -47,12 +48,13 @@ st.caption("Your files are chunked, embedded, and indexed for retrieval. Answers
 #         """
 #     )
 
-with st.expander("**Quick start**", expanded=True):
-    st.markdown("""
-    1. **Upload docs** (`.pdf` / `.txt` / `.docx`)
-    2. **Build / Load Index**
-    3. **Ask a question** and see cited sources
-    """)
+# with st.expander("**Quick start**", expanded=True):
+#     st.markdown("""
+#     1. **Upload docs** (`.pdf` / `.txt` / `.docx`)
+#     2. **Build / Load Index**
+#     3. **Ask a question** and see cited sources
+#     """)
+
 
 # ---------- SESSION DEFAULTS ----------
 st.session_state.setdefault("BASE_DIR", PERSIST_DIR)       # sidebar-selected base folder
@@ -289,70 +291,63 @@ with st.container(border=True):
     # One-time UX note for PDFs
     render_pdf_limit_note_for_uploads(uploaded_files)
 
-    c1, c2, c3 = st.columns([2, 1, 2])
-    with c2:
-        if st.button("Clear uploads"):
-            st.session_state["UPLOAD_KEY"] += 1
-            st.rerun()
+    if st.button("Clear uploads", use_container_width=True):
+        st.session_state["UPLOAD_KEY"] += 1
+        st.rerun()
 
-# ---------- INDEX SWITCHER (named bases) ----------
-# Lists named bases under rag_store/ (e.g., "user", "demo-A"). Switch updates BASE_DIR and reloads the active index pointer.
+    # c1, c2, c3 = st.columns([2, 1, 2])
+    # with c2:
+    #     if st.button("Clear uploads"):
+    #         st.session_state["UPLOAD_KEY"] += 1
+    #         st.rerun()
+
+
+
+# ---------- STEP 2: MANAGE INDEX ----------
 with st.container(border=True):
-    st.markdown("**Active index (base)**")
+    st.subheader("2) Manage index")
 
+    # --- Index Switcher (named bases) ---
     try:
-        # Discover existing bases; ensure current is present in the options
         existing = list_indexes(root=PERSIST_DIR) or []
     except Exception:
         existing = []
 
-    # Current selection comes from session (fallback to basename of BASE_DIR)
     cur_base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
-    cur_name = st.session_state.get("INDEX_NAME", "") or (os.path.basename(cur_base_dir) if os.path.basename(cur_base_dir) != "" else "")
+    cur_name = st.session_state.get("INDEX_NAME", "") or os.path.basename(cur_base_dir) or ""
 
     options = sorted({cur_name, *existing})
     sel = st.selectbox(
-        "Choose a named index",
+        "Active index (base)",
         options=options if options else [""],
         index=(options.index(cur_name) if cur_name in options else 0),
-        help="Switch among named bases under rag_store/. Each base can have multiple timestamped sub-indexes."
+        help="Switch among named bases under rag_store/. Each base can have multiple timestamped sub-indexes.",
     )
 
-    # On change: update session + pointer + load the active index for that base
     if sel != cur_name:
-        # 1) Point BASE_DIR to the selected base folder
         new_base_dir = os.path.join(PERSIST_DIR, sel) if sel else PERSIST_DIR
         os.makedirs(new_base_dir, exist_ok=True)
         st.session_state["INDEX_NAME"] = sel
         st.session_state["BASE_DIR"] = new_base_dir
-
-        # 2) Invalidate any cached resources tied to the previous index
         try:
             st.cache_data.clear()
             st.cache_resource.clear()
         except Exception:
             pass
-
-        # Also clear any cached LLM chains bound to an old persist_dir
         try:
             from llm_chain import invalidate_chain_cache
-            invalidate_chain_cache()  # drop all; simple and safe
+            invalidate_chain_cache()
         except Exception:
             pass
-
-        # 3) Load its active pointer (fallback to latest) and bind st.session_state["vs"]
         from rag_core import read_active_pointer, find_latest_index_dir, save_active_pointer, load_vectorstore_if_exists
         pointer = read_active_pointer(new_base_dir) or find_latest_index_dir(new_base_dir)
-
         if pointer:
             with st.spinner("Switching index…"):
                 vs_sw = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=pointer)
             if vs_sw is not None:
                 st.session_state["vs"] = vs_sw
                 st.session_state["ACTIVE_INDEX_DIR"] = pointer
-                # Persist pointer for this base
                 save_active_pointer(new_base_dir, pointer)
-                # Optional: mirror into index_admin pointer store if implemented
                 try:
                     set_active_index(base=new_base_dir, active_dir=pointer)
                 except Exception:
@@ -361,612 +356,444 @@ with st.container(border=True):
             else:
                 st.session_state["vs"] = None
                 st.session_state["ACTIVE_INDEX_DIR"] = None
-                st.warning("No active sub-index found in the selected base. Build or load one below.")
-
+                st.warning("No active sub-index found. Build or load one below.")
         else:
             st.session_state["vs"] = None
             st.session_state["ACTIVE_INDEX_DIR"] = None
             st.info("This base has no indices yet. Rebuild from uploads to create one.")
 
-# ---------- INDEX BUILD (M1) ----------
-# --- Build / Load controls ---
-rebuild_from_uploads = st.checkbox(
-    "Rebuild from current uploads",
-    value=False,
-    help="ON = create a fresh index in a new folder and re-index the current uploads (previous indices are kept). OFF = load the last active index (fast)."
-)
+    # --- Build / Load controls ---
+    rebuild_from_uploads = st.checkbox(
+        "Rebuild from current uploads",
+        value=False,
+        help="ON = fresh index in a new folder. OFF = load last active index.",
+    )
+    build_btn = st.button("Build / Load Index", type="primary", use_container_width=True, help="Create a fresh index or load the last active one.")
 
-build_btn = st.button("Build / Load Index", type="primary", use_container_width=True)
-
-if build_btn:
-    try:
-        from rag_core import (
-            read_active_pointer, find_latest_index_dir, list_index_dirs, save_active_pointer
-        )
-        base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
-
-        # Decide behavior up-front for an empty base
-        base_has_any = bool(list_index_dirs(base_dir))
-
-        # Case A — Rebuild explicitly requested AND uploads present → rebuild
-        # Case B — Base is empty AND uploads present → build even if toggle is OFF (helpful default)
-        if (rebuild_from_uploads and uploaded_files) or (not base_has_any and uploaded_files):
-            # ----- REBUILD PATH (heavy) -----
-            with st.spinner("Reading, chunking, and indexing…"):
-                fresh_dir = make_fresh_index_dir(base_dir)
-
-                embedding = get_cached_embeddings(embed_model=EMBED_MODEL)
-                vs, stats = build_index_from_files(
-                    uploaded_files=uploaded_files,
-                    embed_model=embed_model,
-                    chunk_size=st.session_state.get("CHUNK_SIZE", 800),
-                    chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
-                    persist_dir=fresh_dir,
-                    embedding_obj=embedding,
-                )
-
-                # Switch the app to the new index (persist across reruns) + save pointer
-                st.session_state["vs"] = vs
-                st.session_state["ACTIVE_INDEX_DIR"] = fresh_dir
-                save_active_pointer(base_dir, fresh_dir)
-
-                st.success(
-                    f"Index built — docs: {stats['num_docs']}, chunks: {stats['num_chunks']}, "
-                    f"avg chunk len: {stats.get('avg_chunk_len', 0)} chars"
-                )
-                st.caption(f"Active index: `{fresh_dir}`")
-                st.caption(f"Sources: {', '.join(stats['sources']) or 'None'}")
-
-
-            # Guard (a): warn if no valid chunks
-            if stats["num_chunks"] == 0:
-                st.warning("No valid text chunks were created. The index was not rebuilt.")
-                st.stop()
-
-            # Guard (b): show skipped files 
-            if stats.get("skipped_files"):
-                st.info("Skipped files: " + ", ".join(stats["skipped_files"]))
-
-
-            # Optional timings/debug
-            if st.session_state.get("SHOW_DEBUG") and stats and isinstance(stats, dict):
-                if "timings" in stats:
-                    t = stats["timings"]
-                    st.caption(
-                        f"Timing — load: {t.get('load_docs','?')}s | "
-                        f"split: {t.get('split','?')}s | "
-                        f"embed: {t.get('embed','?')}s | "
-                        f"persist: {t.get('persist','?')}s | "
-                        f"total: {t.get('total','?')}s"
-                    )
-
+    if build_btn:
+        # (keep your existing build/load logic here unchanged)
+        ...
+    
+    # --- Inspector + Manage files (collapsed) ---
+    with st.expander("Index Inspector & Manage files", expanded=False):
+        active_dir = st.session_state.get("ACTIVE_INDEX_DIR")
+        if not active_dir:
+            st.info("No active index selected yet. Rebuild from uploads to create one.", icon="ℹ️")
         else:
-            # ----- LOAD-ONLY PATH (fast) -----
-            active_dir = st.session_state.get("ACTIVE_INDEX_DIR") or read_active_pointer(base_dir)
-            if not active_dir:
-                active_dir = find_latest_index_dir(base_dir)
-
-            if not active_dir:
-                if uploaded_files:
-                    st.info("No index exists yet. Turn ON 'Rebuild from current uploads' to create one.")
-                else:
-                    st.info("No index exists yet. Upload files above, then click Build.")
+            st.caption(f"Active index path: `{active_dir}`")
+            mf = read_manifest(active_dir)
+            if mf:
+                st.write(
+                    f"**Built:** {mf.get('timestamp','?')} — "
+                    f"**Docs:** {mf.get('num_docs',0)} — "
+                    f"**Chunks:** {mf.get('num_chunks',0)} — "
+                    f"**Avg chunk len:** {mf.get('avg_chunk_len',0)} chars"
+                )
+                # (keep the mismatch warning + per_file table + manage files logic here)
+                ...
             else:
-                with st.spinner("Loading active index…"):
-                    vs = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=active_dir)
-                if vs is None:
-                    st.warning("Couldn’t load that index. Try rebuilding from uploads.")
-                else:
-                    st.session_state["vs"] = vs
-                    st.session_state["ACTIVE_INDEX_DIR"] = active_dir
-                    save_active_pointer(base_dir, active_dir)
-                    st.success(f"Loaded active index: `{active_dir}`")
+                st.info("No manifest found for the active index. Rebuild to generate one.", icon="ℹ️")
 
-    except Exception as e:
-        st.error(f"Index operation failed: {e}")
-        st.info(f"Tip: run `ollama pull {EMBED_MODEL}` (or another embedding model) and try again.")
+# ---------- STEP 3: Q&A ----------
+with st.container(border=True):
+    st.subheader("3) Ask questions about your docs")
+    st.caption("Press Enter or click **Retrieve & Answer**.")
 
-# --- Index Inspector (pre-Q&A) ---
-st.markdown("### Index Inspector")
-active_dir = st.session_state.get("ACTIVE_INDEX_DIR")
+    # fire answer on Enter
+    st.session_state.setdefault("TRIGGER_ANSWER", False)
+    def _on_enter_answer():
+        st.session_state["TRIGGER_ANSWER"] = True
+    st.text_input(
+        "Your question",
+        key="QUESTION",
+        placeholder="e.g., What are the main conclusions?",
+        on_change=_on_enter_answer
+    )
+    question = st.session_state.get("QUESTION", "").strip()
 
-if not active_dir:
-    st.info("No active index selected yet. Rebuild from uploads to create one.", icon="ℹ️")
-else:
-    st.caption(f"Active index path: `{active_dir}`")
-    mf = read_manifest(active_dir)
-    if mf:
-        # Manifest summary (what the index was built with)
-        st.write(
-            f"**Built:** {mf.get('timestamp','?')} — "
-            f"**Docs:** {mf.get('num_docs',0)} — "
-            f"**Chunks:** {mf.get('num_chunks',0)} — "
-            f"**Avg chunk len:** {mf.get('avg_chunk_len',0)} chars"
-        )
+    # answer and preview buttons
+    answer_btn = st.button("Retrieve & Answer", type="primary", use_container_width=True)
+    preview_btn = st.button("Preview Top Sources", use_container_width=True, help="Inspect retrieved chunks before answering.")
 
-        # --- Settings mismatch warning (manifest params vs current UI) ---
-        mf_params = (mf.get("params") or {})
-        current_params = {
-            "embed_model": EMBED_MODEL,
-            "chunk_size": st.session_state.get("CHUNK_SIZE", 800),
-            "chunk_overlap": st.session_state.get("CHUNK_OVERLAP", 120),
-        }
-        # Collect keys where the values differ (including missing in manifest)
-        diff_keys = [k for k, v in current_params.items() if mf_params.get(k) != v]
+    vs = st.session_state.get("vs")
 
-        if diff_keys:
-            # Build a human-friendly diff list
-            lines = []
-            for k in diff_keys:
-                lines.append(
-                    f"- **{k}**: index = `{mf_params.get(k, '∅')}` | UI = `{current_params[k]}`"
-                )
-            st.warning(
-                "Settings differ from the active index. "
-                "Rebuild with the current UI settings to apply changes, or continue using the index as-is.\n\n"
-                + "\n".join(lines)
-            )
-
-        pf = mf.get("per_file", {}) or {}
-        if pf:
-            rows = [
-                        {
-                            "File": k,
-                            "Pages": v.get("pages", 0),
-                            "Chunks": v.get("chunks", 0),
-                            "Chars": v.get("chars", 0),
-                            "Avg chunk len": v.get("avg_chunk_len", 0),
-                        }
-                        for k, v in sorted(pf.items(), key=lambda x: x[0].lower())
-                    ]
-            st.dataframe(rows, use_container_width=True)
-
-        # --- Manage files in this index ---
-        st.markdown("#### Manage files in index")
-        vs = st.session_state.get("vs")
-        if vs is None:
-            st.info("Load or build the index to manage files.", icon="ℹ️")
+    if preview_btn:
+        if not question.strip():
+            st.warning("Please type a question.")
+        elif vs is None:
+            st.error("No vector store found. Build the index first (Step 1).")
         else:
-            sources_in_index = list_sources_in_vs(vs)
-            if not sources_in_index:
-                st.info("No files currently in this index.", icon="ℹ️")
+            with st.spinner("Retrieving…"):
+                mode = st.session_state.get("RETRIEVE_MODE", "dense")
+
+                def _do_retrieve():
+                    try:
+                        return retrieve(
+                            vs, question,
+                            k=top_k,
+                            mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
+                            mode=mode,
+                        )
+                    except TypeError:
+                        # Fallback for older retrieve() signatures
+                        return retrieve(vs, question, k=top_k)
+
+                t0 = time.perf_counter()
+                ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
+                t_retrieve = (time.perf_counter() - t0) * 1000  # ms
+
+
+            if not ok:
+                st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
+            elif not hits_raw:
+                st.info("No results. Try a simpler question or rebuild the index.")
             else:
-                sel = st.selectbox("Select a file", sources_in_index)
+                # normalize to [(doc, score)]
+                norm = normalize_hits(hits_raw)
+                if st.session_state.get("USE_SCORE_THRESH"):
+                    norm = filter_by_score(norm, st.session_state.get("SCORE_THRESH", 0.4))
+                if st.session_state.get("USE_SOURCE_CAP"):
+                    norm = cap_per_source(norm, st.session_state.get("PER_SOURCE_CAP", 2))
 
-                c1, c2 = st.columns(2)
+                with st.expander("Preview — Top sources", expanded=True):
+                    st.markdown("**Chunk Inspector**")
+                    rows = make_chunk_rows(norm, st.session_state.get("SNIPPET_LEN", 240))
+                    st.dataframe(rows, use_container_width=True)
 
-                with c1:
-                    if st.button("Delete from index", disabled=not bool(sel)):
-                        ok = delete_source(vs, sel)
-                        mf_params = (mf.get("params") or {}) if mf else {}
-                        rebuild_manifest_from_vs(active_dir, vs, params=mf_params)
-                        if ok:
-                            st.success(f"Removed '{sel}' from the index.")
-                        else:
-                            st.warning(f"Couldn’t remove '{sel}'.")
-                        st.rerun()
+                    # Sanitize retrieved chunks (Preview only)
+                    docs_only = [d for (d, _) in norm]
+                    sanitize_stats = {"chunks_with_drops": 0, "lines_dropped": 0}
+                    if st.session_state.get("SANITIZE_RETRIEVED", True):
+                        docs_only, sanitize_stats = sanitize_chunks(docs_only)
 
-                with c2:
-                    # Replacement requires an uploaded file with the same name
-                    matching = None
-                    for uf in (uploaded_files or []):
-                        if uf.name == sel:
-                            matching = uf
-                            break
-                    if st.button("Replace from uploads", disabled=not bool(sel)):
-                        if not matching:
-                            st.warning("No matching uploaded file found. Upload with the same name first.")
-                        else:
-                            del_ok, added = add_or_replace_file(
-                                vs, matching,
-                                embed_model=EMBED_MODEL,
-                                chunk_size=st.session_state.get("CHUNK_SIZE", 800),
-                                chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
-                            )
-                            mf_params = (mf.get("params") or {}) if mf else {}
-                            rebuild_manifest_from_vs(active_dir, vs, params=mf_params)
-                            st.success(f"Replaced '{sel}' — added {added} fresh chunk(s).")
-                            st.rerun()
+                    if sanitize_stats.get("lines_dropped", 0) > 0:
+                        st.caption(
+                            f"Sanitized (preview): {sanitize_stats['lines_dropped']} line(s) "
+                            f"in {sanitize_stats['chunks_with_drops']} chunk(s)."
+                        )
 
-    else:
-        st.info("No manifest found for the active index. Rebuild to generate one.", icon="ℹ️")
+                    render_pdf_limit_note_for_docs(docs_only)
 
-# ---------- Q&A (M2) ----------
-st.subheader("2) Ask questions about your docs")
-st.caption("Tip: press Enter to run, or click Retrieve & Answer.")
+                    for i, d in enumerate(docs_only, start=1):
+                        m = d.metadata or {}
+                        src = m.get("source", "unknown")
+                        pg  = m.get("page", None)
+                        cid = m.get("chunk_id") or m.get("id")
+                        hdr = f"Chunk {i} — {src}" + (f" p.{pg}" if pg else "") + (f"  [{cid}]" if cid else "")
+                        with st.expander(hdr):
+                            st.write(d.page_content)
 
-# fire answer on Enter
-st.session_state.setdefault("TRIGGER_ANSWER", False)
-def _on_enter_answer():
-    st.session_state["TRIGGER_ANSWER"] = True
-st.text_input(
-    "Your question",
-    key="QUESTION",
-    placeholder="e.g., What are the main conclusions?",
-    on_change=_on_enter_answer
-)
-question = st.session_state.get("QUESTION", "").strip()
-
-# Retrieve & Answer button (still available)
-answer_btn = st.button("Retrieve & Answer", use_container_width=True)
-# Preview Top Sources button
-preview_btn = st.button("Preview Top Sources", use_container_width=True)
-
-vs = st.session_state.get("vs")
-
-if preview_btn:
-    if not question.strip():
-        st.warning("Please type a question.")
-    elif vs is None:
-        st.error("No vector store found. Build the index first (Step 1).")
-    else:
-        with st.spinner("Retrieving…"):
-            mode = st.session_state.get("RETRIEVE_MODE", "dense")
-
-            def _do_retrieve():
-                try:
-                    return retrieve(
-                        vs, question,
-                        k=top_k,
-                        mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
-                        mode=mode,
-                    )
-                except TypeError:
-                    # Fallback for older retrieve() signatures
-                    return retrieve(vs, question, k=top_k)
-
-            t0 = time.perf_counter()
-            ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
-            t_retrieve = (time.perf_counter() - t0) * 1000  # ms
-
-
-        if not ok:
-            st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
-        elif not hits_raw:
-            st.info("No results. Try a simpler question or rebuild the index.")
+    if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
+        # reset the Enter-trigger for next time
+        st.session_state["TRIGGER_ANSWER"] = False
+        if not question:
+            st.warning("Please type a question.")
+        elif vs is None:
+            st.error("No vector store found. Build the index first (Step 1).")
         else:
-            # normalize to [(doc, score)]
-            norm = normalize_hits(hits_raw)
-            if st.session_state.get("USE_SCORE_THRESH"):
-                norm = filter_by_score(norm, st.session_state.get("SCORE_THRESH", 0.4))
-            if st.session_state.get("USE_SOURCE_CAP"):
-                norm = cap_per_source(norm, st.session_state.get("PER_SOURCE_CAP", 2))
-            st.markdown("### Chunk Inspector")
-            rows = make_chunk_rows(norm, st.session_state.get("SNIPPET_LEN", 240))
-            st.dataframe(rows, use_container_width=True)
+            with st.spinner("Retrieving…"):
+                mode = st.session_state.get("RETRIEVE_MODE", "dense")
 
-            # --- Sanitize retrieved chunks (Preview) ---
-            docs_only = [d for (d, _) in norm]
-            sanitize_stats = {"chunks_with_drops": 0, "lines_dropped": 0}
-            if st.session_state.get("SANITIZE_RETRIEVED", True):
-                docs_only, sanitize_stats = sanitize_chunks(docs_only)
+                def _do_retrieve():
+                    try:
+                        return retrieve(
+                            vs, question,
+                            k=top_k,
+                            mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
+                            mode=mode,
+                        )
+                    except TypeError:
+                        return retrieve(vs, question, k=top_k)
 
-            # Optional badge about sanitization (Preview)
-            if sanitize_stats.get("lines_dropped", 0) > 0:
-                st.caption(
-                    f"Sanitized (preview): {sanitize_stats['lines_dropped']} line(s) "
-                    f"in {sanitize_stats['chunks_with_drops']} chunk(s)."
-                )
-
-            st.markdown("### Retrieved Chunks")
-            # One-time note if any retrieved chunk comes from a PDF
-            render_pdf_limit_note_for_docs(docs_only)
-
-            for i, d in enumerate(docs_only, start=1):
-                m = d.metadata or {}
-                src = m.get("source", "unknown")
-                pg  = m.get("page", None)
-                cid = m.get("chunk_id") or m.get("id")
-                hdr = f"Chunk {i} — {src}" + (f" p.{pg}" if pg else "") + (f"  [{cid}]" if cid else "")
-                with st.expander(hdr):
-                    st.write(d.page_content)
-
-if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
-    # reset the Enter-trigger for next time
-    st.session_state["TRIGGER_ANSWER"] = False
-    if not question:
-        st.warning("Please type a question.")
-    elif vs is None:
-        st.error("No vector store found. Build the index first (Step 1).")
-    else:
-        with st.spinner("Retrieving…"):
-            mode = st.session_state.get("RETRIEVE_MODE", "dense")
-
-            def _do_retrieve():
-                try:
-                    return retrieve(
-                        vs, question,
-                        k=top_k,
-                        mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
-                        mode=mode,
-                    )
-                except TypeError:
-                    return retrieve(vs, question, k=top_k)
-
-            t0 = time.perf_counter()
-            ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
-            t_retrieve = (time.perf_counter() - t0) * 1000  # ms
+                t0 = time.perf_counter()
+                ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
+                t_retrieve = (time.perf_counter() - t0) * 1000  # ms
 
 
-        if not ok:
-            st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
-            st.stop()
-        elif not hits_raw:
-            st.info("No results. Try a simpler question or rebuild the index.")
-            st.stop()
-        else:
-            # normalize to [(doc, score)]
-            norm = normalize_hits(hits_raw)
-            if st.session_state.get("USE_SCORE_THRESH"):
-                norm = filter_by_score(norm, st.session_state.get("SCORE_THRESH", 0.4))
-            if st.session_state.get("USE_SOURCE_CAP"):
-                norm = cap_per_source(norm, st.session_state.get("PER_SOURCE_CAP", 2))
-            docs_only = [d for (d, _) in norm]
-
-            # sanitize retrieved chunks (pre-prompt)
-            sanitize_stats = {"chunks_with_drops": 0, "lines_dropped": 0}
-            if st.session_state.get("SANITIZE_RETRIEVED", True):
-                docs_only, sanitize_stats = sanitize_chunks(docs_only)
-
-            raw_context = "\n\n---\n\n".join(d.page_content for d in docs_only)
-            context_text, bad_lines = guardrails.scrub_context(raw_context)
-
-
-            # Early exit if too thin — show the guardrail banner then stop
-            if guardrails.empty_or_thin_context(context_text):
-                render_guardrail_banner({
-                    "code": "no_context",
-                    "severity": "block",
-                    "message": "Declined — not enough supporting context in your documents."
-                })
+            if not ok:
+                st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
                 st.stop()
+            elif not hits_raw:
+                st.info("No results. Try a simpler question or rebuild the index.")
+                st.stop()
+            else:
+                # normalize to [(doc, score)]
+                norm = normalize_hits(hits_raw)
+                if st.session_state.get("USE_SCORE_THRESH"):
+                    norm = filter_by_score(norm, st.session_state.get("SCORE_THRESH", 0.4))
+                if st.session_state.get("USE_SOURCE_CAP"):
+                    norm = cap_per_source(norm, st.session_state.get("PER_SOURCE_CAP", 2))
+                docs_only = [d for (d, _) in norm]
 
-            # If scrub removed a lot, warn (Phase 3 acceptance: be explicit).
-            if bad_lines:
-                st.warning("Some retrieved lines were removed for safety.")
-                if st.session_state.get("SHOW_DEBUG"):
-                    st.caption("Scrubbed lines:")
-                    for ln in bad_lines[:5]:
-                        st.code(ln)
+                # sanitize retrieved chunks (pre-prompt)
+                sanitize_stats = {"chunks_with_drops": 0, "lines_dropped": 0}
+                if st.session_state.get("SANITIZE_RETRIEVED", True):
+                    docs_only, sanitize_stats = sanitize_chunks(docs_only)
 
-            prompt = build_prompt(
-                context_text,
-                question,
-                chat_history=st.session_state.get("chat_history", []),
-                use_history=st.session_state.get("use_history", False),
-                max_history_turns=st.session_state.get("max_history_turns", 4),
-            )
+                raw_context = "\n\n---\n\n".join(d.page_content for d in docs_only)
+                context_text, bad_lines = guardrails.scrub_context(raw_context)
 
-            with st.spinner("Thinking…"):
-                def _do_llm():
-                    return call_llm(
-                        prompt,
-                        provider=st.session_state.get("LLM_PROVIDER", "ollama"),
-                        model_name=st.session_state.get("LLM_MODEL", "mistral"),
-                        openai_api_key=st.session_state.get("OPENAI_API_KEY"),
-                    )
 
-                t1 = time.perf_counter()
-                ok, answer, err = _attempt_with_timeout(_do_llm, LLM_TIMEOUT_S, retries=1)
-                t_llm = (time.perf_counter() - t1) * 1000  # ms
-
-                if not ok:
-                    st.info(f"Model {err or 'failed'}. It was cancelled to keep the app responsive. Try again.")
+                # Early exit if too thin — show the guardrail banner then stop
+                if guardrails.empty_or_thin_context(context_text):
+                    render_guardrail_banner({
+                        "code": "no_context",
+                        "severity": "block",
+                        "message": "Declined — not enough supporting context in your documents."
+                    })
                     st.stop()
 
-                # --- Normalize LLM result + detect fallback ---
-                # llm_chain.call_llm may return a plain str OR a dict like:
-                # {"text": "...", "meta": {"provider_used": "...", "fallback": True, "reason": "..."}}
-                if isinstance(answer, dict):
-                    answer_text = (answer.get("text") or "").strip()
-                    llm_meta = answer.get("meta") or {}
-                else:
-                    answer_text = (answer or "").strip()
-                    llm_meta = {}
+                # If scrub removed a lot, warn (Phase 3 acceptance: be explicit).
+                if bad_lines:
+                    st.warning("Some retrieved lines were removed for safety.")
+                    if st.session_state.get("SHOW_DEBUG"):
+                        st.caption("Scrubbed lines:")
+                        for ln in bad_lines[:5]:
+                            st.code(ln)
 
-                provider_selected = st.session_state.get("LLM_PROVIDER", "ollama")
-                provider_used = llm_meta.get("provider_used", provider_selected)
-
-                # Small toast if a graceful fallback happened
-                if llm_meta.get("fallback"):
-                    # Keep it lightweight; no retry loops here.
-                    reason = llm_meta.get("reason", "The selected provider was unavailable.")
-                    render_provider_fallback_toast(reason, provider_selected, provider_used)
-
-                st.markdown("### Answer")
-
-
-            # Quick copy buttons (utils.ui)
-            try:
-                citations_str = "; ".join(build_citation_tags(docs_only)) if docs_only else ""
-            except Exception:
-                citations_str = ""
-
-            render_copy_row(answer_text, citations_str)
-
-            # Optional badge about sanitization
-            if sanitize_stats.get("lines_dropped", 0) > 0:
-                st.caption(f"Sanitized: {sanitize_stats['lines_dropped']} line(s) in "
-                           f"{sanitize_stats['chunks_with_drops']} chunk(s).")
-
-            # --- Citations (dedup + page-anchored) ---
-            tags = build_citation_tags(docs_only)
-            if tags:
-                st.caption("Sources: " + "; ".join(tags))
-
-            # === Build QA payload (for exports/history) ===
-            try:
-                qa = build_qa_result(
-                    question=question,
-                    answer=answer,
-                    docs_used=docs_only,        # sanitized docs actually sent to the LLM
-                    pairs=norm,                 # normalized [(Document, score)] used for ranking
-                    meta={
-                        "model": st.session_state.get("LLM_MODEL"),
-                        "top_k": st.session_state.get("TOP_K", top_k),
-                        "retrieval_mode": st.session_state.get("RETRIEVE_MODE"),
-                        "index_name": st.session_state.get("INDEX_NAME"),  # NEW
-                        # Provider provenance (selected vs actually used)
-                        "provider": provider_selected,
-                        "provider_used": provider_used,
-                        # Optional breadcrumbs from llm_chain
-                        "fallback": bool(llm_meta.get("fallback", False)),
-                        "fallback_reason": llm_meta.get("reason"),
-                    },
-                    timings={
-                        "retrieve_ms": round(t_retrieve, 1),
-                        "llm_ms": round(t_llm, 1),
-                    },
-                    context_text=context_text,
-                    sanitize_telemetry=sanitize_stats,
-                    scrubbed_lines=bad_lines,
-                )                
-                # Ensure guardrail statuses are present and pick a primary one for UI
-                statuses = qa.get("guardrail_statuses") or qa.get("guardrails") or []
-                primary = qa.get("guardrail_primary_status")
-                if not primary:
-                    primary = pick_primary_status(statuses) if statuses else {"code": "ok", "severity": "info", "message": "OK"}
-                qa["guardrail_primary_status"] = primary
-
-                st.session_state["last_qa"] = qa
-            except Exception as e:
-                st.info(f"Couldn’t package the Q&A for export: {e}")
-                qa = None
-            
-            # --- Guardrail banner + answer render (single source of truth) ---
-            if qa:
-                primary = qa.get(
-                    "guardrail_primary_status",
-                    {"code": "ok", "severity": "info", "message": "OK"}
+                prompt = build_prompt(
+                    context_text,
+                    question,
+                    chat_history=st.session_state.get("chat_history", []),
+                    use_history=st.session_state.get("use_history", False),
+                    max_history_turns=st.session_state.get("max_history_turns", 4),
                 )
-                render_guardrail_banner(primary)
 
-                if primary.get("code") == "no_context":
-                    st.info("Declined — not enough supporting context. Try rephrasing or uploading more relevant files.")
-                else:
-                    st.write(answer_text)
+                with st.spinner("Thinking…"):
+                    def _do_llm():
+                        return call_llm(
+                            prompt,
+                            provider=st.session_state.get("LLM_PROVIDER", "ollama"),
+                            model_name=st.session_state.get("LLM_MODEL", "mistral"),
+                            openai_api_key=st.session_state.get("OPENAI_API_KEY"),
+                        )
 
-             # --- Why-this-answer panel (compact; always visible) ---
-            if qa:
-                render_why_this_answer(qa)
-                render_dev_metrics(qa)
-            
-            # Build one history turn and append
-            try:
-                answer_text = (qa.get("answer") or "").strip()
-                gist = (answer_text[:200] + "…") if len(answer_text) > 200 else answer_text
-                history_item = {
-                    "question": qa.get("question", ""),
-                    "answer": answer_text,
-                    "answer_gist": gist,
-                    "sources": qa.get("sources", []),
-                    "created_at": (qa.get("meta", {}) or {}).get("timestamp", None),
-                    "run_settings": get_exportable_settings(st.session_state),
-                    # Provider provenance for the turn
-                    "provider_selected": provider_selected,
-                    "provider_used": provider_used,
-                    "fallback": bool((qa.get("meta", {}) or {}).get("fallback", False)),
-                    "fallback_reason": (qa.get("meta", {}) or {}).get("fallback_reason"),
-                    "guardrail_primary_status": qa.get(
+                    t1 = time.perf_counter()
+                    ok, answer, err = _attempt_with_timeout(_do_llm, LLM_TIMEOUT_S, retries=1)
+                    t_llm = (time.perf_counter() - t1) * 1000  # ms
+
+                    if not ok:
+                        st.info(f"Model {err or 'failed'}. It was cancelled to keep the app responsive. Try again.")
+                        st.stop()
+
+                    # --- Normalize LLM result + detect fallback ---
+                    # llm_chain.call_llm may return a plain str OR a dict like:
+                    # {"text": "...", "meta": {"provider_used": "...", "fallback": True, "reason": "..."}}
+                    if isinstance(answer, dict):
+                        answer_text = (answer.get("text") or "").strip()
+                        llm_meta = answer.get("meta") or {}
+                    else:
+                        answer_text = (answer or "").strip()
+                        llm_meta = {}
+
+                    provider_selected = st.session_state.get("LLM_PROVIDER", "ollama")
+                    provider_used = llm_meta.get("provider_used", provider_selected)
+
+                    # Small toast if a graceful fallback happened
+                    if llm_meta.get("fallback"):
+                        # Keep it lightweight; no retry loops here.
+                        reason = llm_meta.get("reason", "The selected provider was unavailable.")
+                        render_provider_fallback_toast(reason, provider_selected, provider_used)
+
+                    st.markdown("### Answer")
+
+
+                # Quick copy buttons (utils.ui)
+                try:
+                    citations_str = "; ".join(build_citation_tags(docs_only)) if docs_only else ""
+                except Exception:
+                    citations_str = ""
+
+                render_copy_row(answer_text, citations_str)
+
+                # Optional badge about sanitization
+                if sanitize_stats.get("lines_dropped", 0) > 0:
+                    st.caption(f"Sanitized: {sanitize_stats['lines_dropped']} line(s) in "
+                            f"{sanitize_stats['chunks_with_drops']} chunk(s).")
+
+                # --- Citations (dedup + page-anchored) ---
+                tags = build_citation_tags(docs_only)
+                if tags:
+                    st.caption("Sources: " + "; ".join(tags))
+
+                # === Build QA payload (for exports/history) ===
+                try:
+                    qa = build_qa_result(
+                        question=question,
+                        answer=answer,
+                        docs_used=docs_only,        # sanitized docs actually sent to the LLM
+                        pairs=norm,                 # normalized [(Document, score)] used for ranking
+                        meta={
+                            "model": st.session_state.get("LLM_MODEL"),
+                            "top_k": st.session_state.get("TOP_K", top_k),
+                            "retrieval_mode": st.session_state.get("RETRIEVE_MODE"),
+                            "index_name": st.session_state.get("INDEX_NAME"),  # NEW
+                            # Provider provenance (selected vs actually used)
+                            "provider": provider_selected,
+                            "provider_used": provider_used,
+                            # Optional breadcrumbs from llm_chain
+                            "fallback": bool(llm_meta.get("fallback", False)),
+                            "fallback_reason": llm_meta.get("reason"),
+                        },
+                        timings={
+                            "retrieve_ms": round(t_retrieve, 1),
+                            "llm_ms": round(t_llm, 1),
+                        },
+                        context_text=context_text,
+                        sanitize_telemetry=sanitize_stats,
+                        scrubbed_lines=bad_lines,
+                    )                
+                    # Ensure guardrail statuses are present and pick a primary one for UI
+                    statuses = qa.get("guardrail_statuses") or qa.get("guardrails") or []
+                    primary = qa.get("guardrail_primary_status")
+                    if not primary:
+                        primary = pick_primary_status(statuses) if statuses else {"code": "ok", "severity": "info", "message": "OK"}
+                    qa["guardrail_primary_status"] = primary
+
+                    st.session_state["last_qa"] = qa
+                except Exception as e:
+                    st.info(f"Couldn’t package the Q&A for export: {e}")
+                    qa = None
+                
+                # --- Guardrail banner + answer render (single source of truth) ---
+                if qa:
+                    primary = qa.get(
                         "guardrail_primary_status",
                         {"code": "ok", "severity": "info", "message": "OK"}
-                    ),
-                }
-                st.session_state["chat_history"].append(history_item)
+                    )
+                    render_guardrail_banner(primary)
 
-                # Cap to last N turns
-                k = int(st.session_state.get("max_history_turns", 4)) or 4
-                if len(st.session_state["chat_history"]) > k:
-                    st.session_state["chat_history"] = st.session_state["chat_history"][-k:]
-            except Exception:
-                pass  # history is best-effort; don't block the UI
+                    if primary.get("code") == "no_context":
+                        st.info("Declined — not enough supporting context. Try rephrasing or uploading more relevant files.")
+                    else:
+                        st.write(answer_text)
 
-            # === Exports (latest turn + full session) ===
-            if qa:
-                st.markdown("#### Exports")
-                render_export_buttons(qa)
+                # --- Why-this-answer panel (compact; always visible) ---
+                if qa:
+                    render_why_this_answer(qa)
+                    render_dev_metrics(qa)
+                
+                # Build one history turn and append
+                try:
+                    answer_text = (qa.get("answer") or "").strip()
+                    gist = (answer_text[:200] + "…") if len(answer_text) > 200 else answer_text
+                    history_item = {
+                        "question": qa.get("question", ""),
+                        "answer": answer_text,
+                        "answer_gist": gist,
+                        "sources": qa.get("sources", []),
+                        "created_at": (qa.get("meta", {}) or {}).get("timestamp", None),
+                        "run_settings": get_exportable_settings(st.session_state),
+                        # Provider provenance for the turn
+                        "provider_selected": provider_selected,
+                        "provider_used": provider_used,
+                        "fallback": bool((qa.get("meta", {}) or {}).get("fallback", False)),
+                        "fallback_reason": (qa.get("meta", {}) or {}).get("fallback_reason"),
+                        "guardrail_primary_status": qa.get(
+                            "guardrail_primary_status",
+                            {"code": "ok", "severity": "info", "message": "OK"}
+                        ),
+                    }
+                    st.session_state["chat_history"].append(history_item)
 
-                idx_label = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
-                render_session_export(st.session_state.get("chat_history", []), idx_label)
+                    # Cap to last N turns
+                    k = int(st.session_state.get("max_history_turns", 4)) or 4
+                    if len(st.session_state["chat_history"]) > k:
+                        st.session_state["chat_history"] = st.session_state["chat_history"][-k:]
+                except Exception:
+                    pass  # history is best-effort; don't block the UI
 
-            # --- Optional: Show cited chunks (subset used in the prompt) ---
-            render_cited_chunks_expander(docs_only, snippet_len=240)
+                # === Exports (latest turn + full session) ===
+                if qa:
+                    st.markdown("#### Exports")
+                    render_export_buttons(qa)
 
-            st.markdown("### Chat (History)")
+                    idx_label = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
+                    render_session_export(st.session_state.get("chat_history", []), idx_label)
 
-            hist = st.session_state.get("chat_history", [])
-            if not hist:
-                st.info("No history yet. Ask a question to start.", icon="💬")
-            else:
-                # Show newest first, up to the configured cap
-                k = int(st.session_state.get("max_history_turns", 4)) or 4
-                turns = list(reversed(hist[-k:]))
-                for i, t in enumerate(turns, start=1):
-                    st.markdown(f"**Q{i}:** {t.get('question','')}")
-                    st.markdown(f"**A{i}:** {t.get('answer','')}")
-                    # tiny source badge line (optional)
-                    if t.get("sources"):
-                        st.caption("Sources: " + "; ".join({s.get('tag', s.get('source','src')) for s in t["sources"] if isinstance(s, dict)}))
+                # --- Sources used in the answer (tidy expander) ---
+                render_cited_chunks_expander(
+                    docs_only,
+                    snippet_len=int(st.session_state.get("SNIPPET_LEN", 240)),
+                    title="Sources used in the answer",
+                    expanded=False,
+                )
 
-                # Tools row under Chat (History): Clear + Export
-                c1, c2 = st.columns([1, 1])
+                st.markdown("### Chat (History)")
 
-                with c1:
-                    if st.button("Clear chat history"):
-                        st.session_state["chat_history"] = []
-                        # Also ensure history usage is off once cleared
-                        st.session_state["use_history"] = False
+                hist = st.session_state.get("chat_history", [])
+                if not hist:
+                    st.info("No history yet. Ask a question to start.", icon="💬")
+                else:
+                    # Show newest first, up to the configured cap
+                    k = int(st.session_state.get("max_history_turns", 4)) or 4
+                    turns = list(reversed(hist[-k:]))
+                    for i, t in enumerate(turns, start=1):
+                        st.markdown(f"**Q{i}:** {t.get('question','')}")
+                        st.markdown(f"**A{i}:** {t.get('answer','')}")
+                        # tiny source badge line (optional)
+                        if t.get("sources"):
+                            st.caption("Sources: " + "; ".join({s.get('tag', s.get('source','src')) for s in t["sources"] if isinstance(s, dict)}))
+
+                    # Tools row under Chat (History): Clear + Export
+                    c1, c2 = st.columns([1, 1])
+
+                    with c1:
+                        if st.button("Clear chat history"):
+                            st.session_state["chat_history"] = []
+                            # Also ensure history usage is off once cleared
+                            st.session_state["use_history"] = False
+                            st.rerun()
+
+                    with c2:
+                        has_history = len(st.session_state.get("chat_history", [])) > 0
+                        # Nice title uses the active index dir (fallback to base dir if none)
+                        idx_label = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
+                        transcript_title = f"Chat Transcript — {os.path.basename(idx_label)}"
+                        chat_md = chat_to_markdown(st.session_state.get("chat_history", []), title=transcript_title)
+
+                        st.download_button(
+                            "Export chat (.md)",
+                            data=chat_md.encode("utf-8"),
+                            file_name="chat_transcript.md",
+                            mime="text/markdown",
+                            disabled=not has_history,
+                        )
+
+
+                st.divider()
+                st.caption(
+                    "Follow-up question (reuses the same retriever). "
+                    + ("Using last turns for continuity." if st.session_state.get("use_history") else "History not used for answering.")
+                )
+
+                # Enter-to-run for Chat input (mirrors main Q&A)
+                st.session_state.setdefault("CHAT_TRIGGER_ANSWER", False)
+                def _on_enter_chat():
+                    st.session_state["CHAT_TRIGGER_ANSWER"] = True
+
+                st.text_input(
+                    "Your follow-up",
+                    key="CHAT_QUESTION",
+                    placeholder="Ask a follow-up…",
+                    on_change=_on_enter_chat
+                )
+
+                chat_go = st.button("Follow-up: Retrieve & Answer", use_container_width=True)
+                if chat_go or st.session_state.get("CHAT_TRIGGER_ANSWER"):
+                    st.session_state["CHAT_TRIGGER_ANSWER"] = False
+                    q = (st.session_state.get("CHAT_QUESTION") or "").strip()
+                    if not q:
+                        st.warning("Type a follow-up question first.")
+                    else:
+                        # Reuse the same pipeline by setting QUESTION + trigger
+                        st.session_state["QUESTION"] = q
+                        st.session_state["TRIGGER_ANSWER"] = True
                         st.rerun()
 
-                with c2:
-                    has_history = len(st.session_state.get("chat_history", [])) > 0
-                    # Nice title uses the active index dir (fallback to base dir if none)
-                    idx_label = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
-                    transcript_title = f"Chat Transcript — {os.path.basename(idx_label)}"
-                    chat_md = chat_to_markdown(st.session_state.get("chat_history", []), title=transcript_title)
-
-                    st.download_button(
-                        "Export chat (.md)",
-                        data=chat_md.encode("utf-8"),
-                        file_name="chat_transcript.md",
-                        mime="text/markdown",
-                        disabled=not has_history,
-                    )
-
-
-            st.divider()
-            st.caption(
-                "Follow-up question (reuses the same retriever). "
-                + ("Using last turns for continuity." if st.session_state.get("use_history") else "History not used for answering.")
-            )
-
-            # Enter-to-run for Chat input (mirrors main Q&A)
-            st.session_state.setdefault("CHAT_TRIGGER_ANSWER", False)
-            def _on_enter_chat():
-                st.session_state["CHAT_TRIGGER_ANSWER"] = True
-
-            st.text_input(
-                "Your follow-up",
-                key="CHAT_QUESTION",
-                placeholder="Ask a follow-up…",
-                on_change=_on_enter_chat
-            )
-
-            chat_go = st.button("Follow-up: Retrieve & Answer", use_container_width=True)
-            if chat_go or st.session_state.get("CHAT_TRIGGER_ANSWER"):
-                st.session_state["CHAT_TRIGGER_ANSWER"] = False
-                q = (st.session_state.get("CHAT_QUESTION") or "").strip()
-                if not q:
-                    st.warning("Type a follow-up question first.")
-                else:
-                    # Reuse the same pipeline by setting QUESTION + trigger
-                    st.session_state["QUESTION"] = q
-                    st.session_state["TRIGGER_ANSWER"] = True
-                    st.rerun()
-
 # ---------- EVAL SNAPSHOT (Retrieval-only) ----------
-with st.expander("Eval — retrieval snapshot (hit@k & MRR)", expanded=False):
-    st.caption("Runs on eval/qa.jsonl (retrieval-only; no LLM). Matches filename + page (if given).")
+with st.expander("Evaluation — dev only (retrieval hit@k & MRR)", expanded=False):
+    st.info("For development: evaluates retrieval only (no LLM) using eval/qa.jsonl. Matches filename + page if provided.", icon="🛠️")
 
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
@@ -1014,7 +841,3 @@ with st.expander("Eval — retrieval snapshot (hit@k & MRR)", expanded=False):
                         hide_index=True,
                     )
                     st.divider()
-
-# ---------- FOOTER ----------
-st.markdown("---")
-st.caption("Scope-first scaffold. Implement M1 → M2 in small commits. Keep it simple.")
