@@ -61,9 +61,11 @@ def build_prompt(
         )
         if hist_txt:
             # History is for continuity ONLY. Documents remain the ground truth.
-            history_block = f"\n\nConversation (recent, for continuity only — do not cite):\n{hist_txt}"
+            history_block = (
+                "\n\nConversation (recent, for continuity only — do not cite):\n" + hist_txt
+            )
 
-        return (
+    return (
         f"Context (authoritative; cite from this):\n{context}"
         f"{history_block}\n\n"
         f"Question: {question}\n\n"

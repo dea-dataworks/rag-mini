@@ -1,4 +1,4 @@
-# RAG Mini v0.2 
+# RAG Explorer
 
 A tiny, local Retrieval-Augmented Generation app (Streamlit + LangChain + Chroma + Ollama).  
 
@@ -77,6 +77,26 @@ streamlit run app.py --server.port 8502
 
 - **Version conflicts during pip install**  
 If you hit resolver errors, try Python 3.12 and the pinned ranges in `requirements.txt`, then upgrade one-by-one if needed.
+
+## Tests
+
+This project includes a minimal pytest suite in the `tests/` folder.  
+The suite runs quickly (<2s) and uses a small built-in fixture corpus.
+
+### Running the tests
+
+From the repo root:
+
+**Linux / macOS**
+```
+PYTHONPATH=. pytest -q
+```
+
+**Windows PowerShell**
+```
+$env:PYTHONPATH="."; pytest -q
+```
+
 
 ## License
 

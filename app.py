@@ -46,13 +46,33 @@ st.session_state.setdefault("LLM_MODEL", "mistral")
 st.session_state.setdefault("chat_history", [])   # list[dict]: prior turns
 st.session_state.setdefault("use_history", False) # UI toggle: condition LLM on prior turns
 st.session_state.setdefault("max_history_turns", 4)  # small cap to avoid token bloat
-# ---------- HELPERS ----------
 
+# ---------- HELPERS ----------
 @st.cache_resource
 def get_cached_embeddings(embed_model: str):
     # calls your rag_core.get_embeddings under the hood
     from rag_core import get_embeddings
     return get_embeddings(embed_model)
+
+def _retrieve_hits(vs, question: str, top_k: int):
+    """
+    One-shot retrieval with timeout + timing.
+    Returns: (ok: bool, hits_raw: Any, t_retrieve_ms: float, err: Optional[str])
+    """
+    mode = st.session_state.get("RETRIEVE_MODE", "dense")
+    mmr = st.session_state.get("MMR_LAMBDA", 0.7)
+
+    def _do_retrieve():
+        try:
+            return retrieve(vs, question, k=top_k, mmr_lambda=mmr, mode=mode)
+        except TypeError:
+            # Back-compat with older retrieve() signature
+            return retrieve(vs, question, k=top_k)
+
+    t0 = time.perf_counter()
+    ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
+    t_ms = (time.perf_counter() - t0) * 1000.0
+    return ok, hits_raw, t_ms, err
 
 if "vs" not in st.session_state:
     st.session_state["vs"] = None
@@ -404,25 +424,7 @@ with st.container(border=True):
             st.error("No vector store found. Build the index first (Step 1).")
         else:
             with st.spinner("Retrieving…"):
-                mode = st.session_state.get("RETRIEVE_MODE", "dense")
-
-                def _do_retrieve():
-                    try:
-                        return retrieve(
-                            vs, question,
-                            k=top_k,
-                            mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
-                            mode=mode,
-                        )
-                    except TypeError:
-                        # Fallback for older retrieve() signatures
-                        return retrieve(vs, question, k=top_k)
-
-                t0 = time.perf_counter()
-                ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
-                t_retrieve = (time.perf_counter() - t0) * 1000  # ms
-
-
+                ok, hits_raw, t_retrieve, err = _retrieve_hits(vs, question, top_k)
             if not ok:
                 st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
             elif not hits_raw:
@@ -472,24 +474,7 @@ with st.container(border=True):
             st.error("No vector store found. Build the index first (Step 1).")
         else:
             with st.spinner("Retrieving…"):
-                mode = st.session_state.get("RETRIEVE_MODE", "dense")
-
-                def _do_retrieve():
-                    try:
-                        return retrieve(
-                            vs, question,
-                            k=top_k,
-                            mmr_lambda=st.session_state.get("MMR_LAMBDA", 0.7),
-                            mode=mode,
-                        )
-                    except TypeError:
-                        return retrieve(vs, question, k=top_k)
-
-                t0 = time.perf_counter()
-                ok, hits_raw, err = _attempt_with_timeout(_do_retrieve, RETRIEVAL_TIMEOUT_S, retries=1)
-                t_retrieve = (time.perf_counter() - t0) * 1000  # ms
-
-
+                ok, hits_raw, t_retrieve, err = _retrieve_hits(vs, question, top_k)
             if not ok:
                 st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
                 st.stop()
