@@ -116,8 +116,10 @@ with st.sidebar:
     with st.expander("Advanced", expanded=False):
         st.markdown("**Provider**")
 
-        use_openai = st.checkbox("Use OpenAI (cloud)", value=False,
-                                 help="Default stays local with Ollama/mistral.")
+        default_use_openai = (st.session_state.get("LLM_PROVIDER", "ollama") == "openai")
+        use_openai = st.checkbox("Use OpenAI (cloud)", value=default_use_openai,
+                                help="Default stays local with Ollama/mistral.")
+
         if use_openai:
             # API key + model select only when enabled
             openai_key = st.text_input("OpenAI API Key", type="password")
