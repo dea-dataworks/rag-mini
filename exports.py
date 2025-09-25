@@ -22,6 +22,11 @@ def _flatten_qa_rows(qa: Dict) -> List[Dict]:
         "model": qa.get("meta", {}).get("model"),
         "retrieval_mode": qa.get("meta", {}).get("retrieval_mode"),
         "top_k": qa.get("meta", {}).get("top_k"),
+        # --- provider provenance ---
+        "provider": qa.get("meta", {}).get("provider"),
+        "provider_used": qa.get("meta", {}).get("provider_used"),
+        "fallback": qa.get("meta", {}).get("fallback"),
+        # --------------------------------
         "num_chunks_used": len(qa.get("chunks", []) or []),
         # optional: a compact citations field
         "citations": ", ".join(
@@ -60,8 +65,11 @@ def to_markdown(qa: Dict, snippet_max: int = 500) -> str:
         "### Q&A Export",
         f"- **Timestamp:** {meta.get('timestamp')}",
         f"- **Model:** {meta.get('model') or ''}",
+        f"- **Provider:** {meta.get('provider') or ''} → used: {meta.get('provider_used') or meta.get('provider') or ''}"
+        + (" (fallback)" if meta.get("fallback") else ""),
         f"- **Retrieval:** {meta.get('retrieval_mode') or ''} · top_k={meta.get('top_k')}",
     ]
+
 
     # Add citations line if present
     citations = qa.get("citations", []) or []
@@ -178,10 +186,25 @@ def chat_to_markdown(chat_history, title="Chat Transcript"):
             for k, v in run_settings.items():
                 lines.append(f"- {k}: {v}")
 
+        # --- Provider provenance (if present) ---
+        prov_sel = turn.get("provider_selected")
+        prov_used = turn.get("provider_used") or prov_sel
+        if prov_sel or prov_used:
+            lines.append("")
+            lines.append("**Provider:**")
+            if prov_sel:
+                lines.append(f"- selected: {prov_sel}")
+            if prov_used:
+                suffix = " (fallback)" if turn.get("fallback") else ""
+                lines.append(f"- used: {prov_used}{suffix}")
+            if turn.get("fallback_reason"):
+                lines.append(f"- reason: {turn.get('fallback_reason')}")
+
         # add a compact guardrail note if not OK
         if gr_code != "ok" and gr_msg:
             lines.append("")
             lines.append(f"**Guardrail:** {gr_msg}")
+
 
         lines.append("")
         lines.append("**Q:** " + (q if q else "_(empty)_"))

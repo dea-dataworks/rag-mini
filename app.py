@@ -14,7 +14,8 @@ from index_admin import (
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
 from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
                     render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
-                    render_dev_metrics, render_session_export, get_exportable_settings, render_guardrail_banner)
+                    render_dev_metrics, render_session_export, get_exportable_settings, render_guardrail_banner,
+                    render_provider_fallback_toast)
 from eval.run_eval import run_eval_snapshot
 from exports import chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
@@ -615,7 +616,6 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
 
             # Early exit if too thin — show the guardrail banner then stop
             if guardrails.empty_or_thin_context(context_text):
-                from utils.ui import render_guardrail_banner
                 render_guardrail_banner({
                     "code": "no_context",
                     "severity": "block",
@@ -652,11 +652,31 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                 ok, answer, err = _attempt_with_timeout(_do_llm, LLM_TIMEOUT_S, retries=1)
                 t_llm = (time.perf_counter() - t1) * 1000  # ms
 
-            if not ok:
-                st.info(f"Model {err or 'failed'}. It was cancelled to keep the app responsive. Try again.")
-                st.stop()
+                if not ok:
+                    st.info(f"Model {err or 'failed'}. It was cancelled to keep the app responsive. Try again.")
+                    st.stop()
 
-            st.markdown("### Answer")
+                # --- Normalize LLM result + detect fallback ---
+                # llm_chain.call_llm may return a plain str OR a dict like:
+                # {"text": "...", "meta": {"provider_used": "...", "fallback": True, "reason": "..."}}
+                if isinstance(answer, dict):
+                    answer_text = (answer.get("text") or "").strip()
+                    llm_meta = answer.get("meta") or {}
+                else:
+                    answer_text = (answer or "").strip()
+                    llm_meta = {}
+
+                provider_selected = st.session_state.get("LLM_PROVIDER", "ollama")
+                provider_used = llm_meta.get("provider_used", provider_selected)
+
+                # Small toast if a graceful fallback happened
+                if llm_meta.get("fallback"):
+                    # Keep it lightweight; no retry loops here.
+                    reason = llm_meta.get("reason", "The selected provider was unavailable.")
+                    render_provider_fallback_toast(reason, provider_selected, provider_used)
+
+                st.markdown("### Answer")
+
 
             # Quick copy buttons (utils.ui)
             try:
@@ -664,7 +684,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
             except Exception:
                 citations_str = ""
 
-            render_copy_row(answer, citations_str)
+            render_copy_row(answer_text, citations_str)
 
             # Optional badge about sanitization
             if sanitize_stats.get("lines_dropped", 0) > 0:
@@ -687,7 +707,13 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                         "model": st.session_state.get("LLM_MODEL"),
                         "top_k": st.session_state.get("TOP_K", top_k),
                         "retrieval_mode": st.session_state.get("RETRIEVE_MODE"),
-                     },
+                        # Provider provenance (selected vs actually used)
+                        "provider": provider_selected,
+                        "provider_used": provider_used,
+                        # Optional breadcrumbs from llm_chain
+                        "fallback": bool(llm_meta.get("fallback", False)),
+                        "fallback_reason": llm_meta.get("reason"),
+                    },
                     timings={
                         "retrieve_ms": round(t_retrieve, 1),
                         "llm_ms": round(t_llm, 1),
@@ -719,7 +745,7 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                 if primary.get("code") == "no_context":
                     st.info("Declined — not enough supporting context. Try rephrasing or uploading more relevant files.")
                 else:
-                    st.write(answer)
+                    st.write(answer_text)
 
              # --- Why-this-answer panel (compact; always visible) ---
             if qa:
@@ -737,6 +763,11 @@ if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
                     "sources": qa.get("sources", []),
                     "created_at": (qa.get("meta", {}) or {}).get("timestamp", None),
                     "run_settings": get_exportable_settings(st.session_state),
+                    # Provider provenance for the turn
+                    "provider_selected": provider_selected,
+                    "provider_used": provider_used,
+                    "fallback": bool((qa.get("meta", {}) or {}).get("fallback", False)),
+                    "fallback_reason": (qa.get("meta", {}) or {}).get("fallback_reason"),
                     "guardrail_primary_status": qa.get(
                         "guardrail_primary_status",
                         {"code": "ok", "severity": "info", "message": "OK"}

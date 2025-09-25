@@ -5,14 +5,14 @@ DEFAULT_SETTINGS = {
     "chunk_size": 800,
     "chunk_overlap": 120,
     "k": 4,
-    "provider": "ollama",
+    "provider": "ollama",          # default; OpenAI optional
     "use_history": False,
     "max_history_turns": 3,
     "mmr_lambda": 0.7,
     "score_threshold": 0.0,
     "sanitize": True,
     "debug": False,
-    # --- NEW: guardrail controls ---
+    # --- guardrail controls ---
     "guardrails_enabled": True,     # feature flag (UI can honor this)
     "guardrails_strict": False,     # if True, decline on warnings; else warn-first
     "min_context_chars": 40,        # thin-context threshold for 'has context'
@@ -29,12 +29,16 @@ def load_settings():
     return DEFAULT_SETTINGS.copy()
 
 def save_settings(d: dict):
+    """
+    Persist only the known, safe settings (no secrets).
+    Anything not in DEFAULT_SETTINGS is ignored on save.
+    """
     safe = {k: d.get(k, DEFAULT_SETTINGS[k]) for k in DEFAULT_SETTINGS}
     with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
         json.dump(safe, f, indent=2, ensure_ascii=False)
 
 def seed_session_from_settings(st):
-    """Idempotently seed st.session_state with persisted settings."""
+    """Idempotently seed st.session_state with persisted settings (lower-case schema)."""
     settings = load_settings()
     for k, v in settings.items():
         if k not in st.session_state:

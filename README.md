@@ -16,6 +16,7 @@ Models: Ollama mistral for answers, nomic-embed-text for embeddings.
 ## Prerequisites
 - Python 3.13 (tested). If you hit install issues on 3.13, try 3.12.
 - [Ollama](https://ollama.com) installed
+- If you plan to use OpenAI install with pip install -r requirements.txt openai langchain-openai.
 
 ## Quickstart
 # Make sure Ollama is running (menu bar / system tray) before launching Streamlit.

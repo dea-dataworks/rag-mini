@@ -62,7 +62,7 @@ def build_prompt(
             # History is for continuity ONLY. Documents remain the ground truth.
             history_block = f"\n\nConversation (recent, for continuity only — do not cite):\n{hist_txt}"
 
-    return (
+        return (
         f"Context (authoritative; cite from this):\n{context}"
         f"{history_block}\n\n"
         f"Question: {question}\n\n"
@@ -74,32 +74,91 @@ def build_prompt(
         "Answer:"
     )
 
+# ---- helpers for model construction and response handling ----
+def _extract_text(resp) -> str:
+    """Get text content from a LangChain chat return."""
+    try:
+        txt = getattr(resp, "content", None)
+        if txt is None:
+            txt = str(resp)
+        return (txt or "").strip()
+    except Exception:
+        return ""
+
+def _make_llm(provider: str, model_name: str, temperature: float, openai_api_key: Optional[str]):
+    """
+    Build an LLM client for the requested provider.
+    Raises an Exception if it can't be constructed.
+    """
+    p = (provider or "ollama").lower()
+    if p == "openai":
+        if not openai_api_key:
+            raise ValueError("OpenAI key missing")
+        try:
+            from langchain_openai import ChatOpenAI
+        except Exception as e:
+            raise RuntimeError(f"OpenAI client unavailable: {e}")
+        return ChatOpenAI(model=model_name, temperature=temperature, api_key=openai_api_key), "openai"
+
+    # default to Ollama
+    try:
+        from langchain_ollama import ChatOllama
+    except Exception as e:
+        raise RuntimeError(f"Ollama client unavailable: {e}")
+    return ChatOllama(model=model_name, temperature=temperature), "ollama"
+
 def call_llm(
     prompt: str,
     provider: str = "ollama",
     model_name: str = "mistral",
     openai_api_key: Optional[str] = None,
     temperature: float = 0.2,
-) -> str:
-    if provider == "openai":
-        if not openai_api_key:
-            raise ValueError("OpenAI key not provided.")
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(model=model_name, temperature=temperature, api_key=openai_api_key)
-    else:
-        from langchain_ollama import ChatOllama
-        llm = ChatOllama(model=model_name, temperature=temperature)
+):
+    """
+    Build the requested provider; on init or invoke error, gracefully fall back to Ollama once.
+    Returns either:
+      - dict: {"text": str, "meta": {"provider_used": str, "fallback": bool, "reason": Optional[str]}}
+      - or a plain string (e.g., FALLBACK_NO_CITATION) for guardrail short-circuits.
+    """
+    selected = (provider or "ollama").lower()
+    llm = None
+    provider_used = selected
+    fallback = False
+    reason = None
 
-    messages = [
-        SystemMessage(content=GUARDRAIL_SYSTEM),
-        HumanMessage(content=prompt),
-    ]
-    resp = llm.invoke(messages)
-    answer = getattr(resp, "content", str(resp))
+    # --- Try primary provider ---
+    try:
+        llm, provider_used = _make_llm(selected, model_name, temperature, openai_api_key)
+        messages = [SystemMessage(content=GUARDRAIL_SYSTEM), HumanMessage(content=prompt)]
+        resp = llm.invoke(messages)
+        text = _extract_text(resp)
+    except Exception as e_primary:
+        reason = f"{selected} error: {e_primary}"
+        # If already ollama, don't loop; surface the error up.
+        if selected == "ollama":
+            raise
+        # --- Single-hop fallback to Ollama ---
+        try:
+            llm, provider_used = _make_llm("ollama", model_name, temperature, openai_api_key=None)
+            messages = [SystemMessage(content=GUARDRAIL_SYSTEM), HumanMessage(content=prompt)]
+            resp = llm.invoke(messages)
+            text = _extract_text(resp)
+            fallback = True
+        except Exception as e_fallback:
+            # Both providers failed; surface the original + fallback error context.
+            raise RuntimeError(f"{reason}; fallback(ollama) error: {e_fallback}") from e_fallback
 
-    # Post-answer guardrail: no citation pattern → fallback
-    if not has_citation(answer):
+    # Post-answer guardrail: no citation pattern → return special fallback text
+    if not has_citation(text):
         return FALLBACK_NO_CITATION
 
-    return answer
+    return {
+        "text": text,
+        "meta": {
+            "provider_used": provider_used,
+            "fallback": fallback,
+            "reason": reason if fallback else None,
+        },
+    }
+
 

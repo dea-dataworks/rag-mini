@@ -269,3 +269,14 @@ def get_exportable_settings(state) -> dict:
 
     return out
 
+# --- Provider / fallback toast helper ---
+def render_provider_fallback_toast(reason: str, from_provider: str, to_provider: str):
+    """
+    Show a small, consistent toast when we auto-fallback providers.
+    Keep it low-key on purpose (info-level).
+    """
+    import streamlit as st
+    msg = f"Switched from **{from_provider}** → **{to_provider}** automatically."
+    if reason:
+        msg += f" ({reason})"
+    st.info(msg)
