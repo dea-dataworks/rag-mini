@@ -51,6 +51,7 @@ def _resolve_active_dir(persist_dir: str) -> str | None:
     return get_active_index(base=persist_dir)
 
 def run_quick_eval(qpath: str, k_eval: int, mmr_lambda: float, embed_model: str, persist_dir: str = "rag_store"):
+    """Compare baseline KNN vs hybrid retrieval on hit@k and MRR for a JSONL QA set."""
     qa_rows = _read_jsonl(qpath)
     if not qa_rows:
         return pd.DataFrame(), {"msg": "No questions", "k": k_eval}

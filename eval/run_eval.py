@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Dict
 import pandas as pd
 from langchain_core.documents import Document
 from index_admin import get_active_index
-from rag_core import load_vectorstore_if_exists, get_embeddings, retrieve
+from rag_core import load_vectorstore_if_exists, retrieve
 
 @dataclass
 class QAPair:
@@ -89,8 +89,13 @@ def run_eval_snapshot(
 
     for mode in modes:
         rows = []
+        mode_lc = (mode or "dense").lower()  # accept ["BM25","Hybrid","Dense"] etc.
         for item in qa_items:
-            pairs = retrieve(vs, item.question, k=k, mode=mode)
+            # Back-compat: older retrieve() may not accept 'mode'
+            try:
+                pairs = retrieve(vs, item.question, k=k, mode=mode_lc)
+            except TypeError:
+                pairs = retrieve(vs, item.question, k=k)
 
             docs = [d for (d, _s) in pairs]
             rank = _rank_of_first_match(docs, item.source, item.page)
