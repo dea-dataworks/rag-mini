@@ -27,14 +27,16 @@ def _flatten_qa_rows(qa: Dict) -> List[Dict]:
         "provider": qa.get("meta", {}).get("provider"),
         "provider_used": qa.get("meta", {}).get("provider_used"),
         "fallback": qa.get("meta", {}).get("fallback"),
+        "fallback_reason": qa.get("meta", {}).get("fallback_reason"),
         # --------------------------------
         "num_chunks_used": len(qa.get("chunks", []) or []),
         # optional: a compact citations field
         "citations": ", ".join(
             [f"{c.get('source')}" + (f" p.{c.get('page')}" if c.get('page') else "")
-             for c in qa.get("citations", [])]
+            for c in qa.get("citations", [])]
         ),
     }
+
     rows = []
     chunks = qa.get("chunks", []) or []
     if not chunks:
@@ -66,11 +68,20 @@ def to_markdown(qa: Dict, snippet_max: int = 500) -> str:
         "### Q&A Export",
         f"- **Timestamp:** {meta.get('timestamp')}",
         f"- **Model:** {meta.get('model') or ''}",
-        f"- **Provider:** {meta.get('provider') or ''} → used: {meta.get('provider_used') or meta.get('provider') or ''}"
-        + (" (fallback)" if meta.get("fallback") else ""),
         f"- **Retrieval:** {meta.get('retrieval_mode') or ''} · top_k={meta.get('top_k')}",
-        f"- **Index:** {meta.get('index_name') or 'default'}",   # NEW
+        f"- **Index:** {meta.get('index_name') or 'default'}",
     ]
+
+    # Provider provenance (match chat export style)
+    prov_sel = meta.get("provider")
+    prov_used = meta.get("provider_used") or prov_sel
+    if prov_sel or prov_used:
+        header.append(f"- **Provider selected:** {prov_sel or ''}")
+        suffix = " (fallback)" if meta.get("fallback") else ""
+        header.append(f"- **Provider used:** {prov_used or ''}{suffix}")
+        if meta.get("fallback_reason"):
+            header.append(f"- **Reason:** {meta.get('fallback_reason')}")
+
 
 
 
@@ -188,9 +199,6 @@ def chat_to_markdown(chat_history, title="Chat Transcript"):
             lines.append("**Run settings:**")
             for k, v in run_settings.items():
                 lines.append(f"- {k}: {v}")
-                idx_name = turn.get("run_settings", {}).get("index_name")
-                if idx_name:
-                    lines.append(f"- index_name: {idx_name}")
 
         # --- Provider provenance (if present) ---
         prov_sel = turn.get("provider_selected")
