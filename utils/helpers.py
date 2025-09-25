@@ -16,7 +16,8 @@ def _attempt_with_timeout(fn, timeout_s: float, retries: int = 1):
                 fut = ex.submit(fn)
                 return True, fut.result(timeout=timeout_s), None
         except _FutTimeout:
-            last_err = f"timed out after {timeout_s}s"
+            fn_name = getattr(fn, "__name__", "call")
+            last_err = f"{fn_name} timed out after {timeout_s}s"
         except Exception as e:
             last_err = str(e)
     return False, None, last_err
