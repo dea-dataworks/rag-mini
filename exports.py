@@ -22,6 +22,7 @@ def _flatten_qa_rows(qa: Dict) -> List[Dict]:
         "model": qa.get("meta", {}).get("model"),
         "retrieval_mode": qa.get("meta", {}).get("retrieval_mode"),
         "top_k": qa.get("meta", {}).get("top_k"),
+        "index_name": qa.get("meta", {}).get("index_name"),
         # --- provider provenance ---
         "provider": qa.get("meta", {}).get("provider"),
         "provider_used": qa.get("meta", {}).get("provider_used"),
@@ -68,7 +69,9 @@ def to_markdown(qa: Dict, snippet_max: int = 500) -> str:
         f"- **Provider:** {meta.get('provider') or ''} → used: {meta.get('provider_used') or meta.get('provider') or ''}"
         + (" (fallback)" if meta.get("fallback") else ""),
         f"- **Retrieval:** {meta.get('retrieval_mode') or ''} · top_k={meta.get('top_k')}",
+        f"- **Index:** {meta.get('index_name') or 'default'}",   # NEW
     ]
+
 
 
     # Add citations line if present
@@ -185,6 +188,9 @@ def chat_to_markdown(chat_history, title="Chat Transcript"):
             lines.append("**Run settings:**")
             for k, v in run_settings.items():
                 lines.append(f"- {k}: {v}")
+                idx_name = turn.get("run_settings", {}).get("index_name")
+                if idx_name:
+                    lines.append(f"- index_name: {idx_name}")
 
         # --- Provider provenance (if present) ---
         prov_sel = turn.get("provider_selected")
