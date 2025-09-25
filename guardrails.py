@@ -131,19 +131,18 @@ def guard_export_settings(run_settings: dict) -> dict:
     allowed = {
         "model", "provider", "top_k", "retrieval_mode",
         "chunk_size", "chunk_overlap", "mmr_lambda",
-        "use_history", "max_history_turns",
+        "use_history", "max_history_turns", "index_name",
     }
+    allowed_lc = {a.lower() for a in allowed}
 
     safe = {}
     for k, v in run_settings.items():
         kl = str(k).lower()
-        if k in allowed:
+        if kl in allowed_lc:
             safe[k] = v
         elif any(term in kl for term in ["key", "token", "secret"]):
             safe[k] = "[REDACTED]"
-        # ignore anything unexpected
     return safe
-
 
 # =========================
 # Guardrail status API
@@ -181,14 +180,10 @@ def _detect_possible_conflict(docs: List[Document]) -> bool:
         return True if distinct_sources else False
 
     # 2) too many distinct years across top chunks → likely timeline disagreement
-    years = set()
-    for d in docs:
-        years.update(_YEAR_RE.findall(d.page_content or ""))  # findall returns tuples due to group; normalize below
-    # normalize tuple matches ('19','90') → just join digits in the text by re-finditer instead
     years = set(m.group(0) for d in docs for m in _YEAR_RE.finditer(d.page_content or ""))
-
     if distinct_sources and len(years) >= 4:
         return True
+
 
     # 3) Large numeric spread across sources (coarse)
     nums_by_src = {}
