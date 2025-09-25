@@ -3,6 +3,7 @@ import uuid
 import streamlit.components.v1 as components
 import streamlit as st
 from exports import to_markdown, to_csv_bytes, to_excel_bytes, chat_to_markdown
+from utils.settings import get_exportable_settings
 
 def render_copy_button(label: str, text: str, key: str | None = None):
     _key = key or str(uuid.uuid4()).replace("-", "")
@@ -200,8 +201,6 @@ def render_session_export(chat_history, idx_label: str):
 # Guardrail banners + settings export
 # ------------------------------
 
-import streamlit as st  # (safe: already imported above, but okay to re-import)
-
 def render_guardrail_banner(status: dict | None):
     """
     Show a compact banner based on a guardrail status:
@@ -232,35 +231,35 @@ def render_guardrail_banner(status: dict | None):
             st.info(msg, icon="ℹ️")
         # if ok, show nothing—keeps UI clean
 
-def get_exportable_settings(state) -> dict:
-    """
-    Snapshot of run settings safe for persistence/export. 
-    Redacts secrets and skips transient UI-only fields.
-    """
-    s = state or {}
+# def get_exportable_settings(state) -> dict:
+#     """
+#     Snapshot of run settings safe for persistence/export. 
+#     Redacts secrets and skips transient UI-only fields.
+#     """
+#     s = state or {}
 
-    out = {
-        "provider": s.get("LLM_PROVIDER", "ollama"),
-        "model": s.get("LLM_MODEL", "mistral"),
-        "top_k": int(s.get("TOP_K", 4) or 4),
-        "retrieval_mode": s.get("RETRIEVE_MODE", "dense"),
-        "chunk_size": int(s.get("CHUNK_SIZE", 800) or 800),
-        "chunk_overlap": int(s.get("CHUNK_OVERLAP", 120) or 120),
-        "mmr_lambda": float(s.get("MMR_LAMBDA", 0.7) or 0.7),
-        "use_history": bool(s.get("use_history", False)),
-        "max_history_turns": int(s.get("max_history_turns", 4) or 4),
-        "use_score_threshold": bool(s.get("USE_SCORE_THRESH", False)),
-        "score_threshold": float(s.get("SCORE_THRESH", 0.4) or 0.4),
-        "use_per_source_cap": bool(s.get("USE_SOURCE_CAP", False)),
-        "per_source_cap": int(s.get("PER_SOURCE_CAP", 2) or 2),
-        "sanitize_retrieved": bool(s.get("SANITIZE_RETRIEVED", True)),
-    }
+#     out = {
+#         "provider": s.get("LLM_PROVIDER", "ollama"),
+#         "model": s.get("LLM_MODEL", "mistral"),
+#         "top_k": int(s.get("TOP_K", 4) or 4),
+#         "retrieval_mode": s.get("RETRIEVE_MODE", "dense"),
+#         "chunk_size": int(s.get("CHUNK_SIZE", 800) or 800),
+#         "chunk_overlap": int(s.get("CHUNK_OVERLAP", 120) or 120),
+#         "mmr_lambda": float(s.get("MMR_LAMBDA", 0.7) or 0.7),
+#         "use_history": bool(s.get("use_history", False)),
+#         "max_history_turns": int(s.get("max_history_turns", 4) or 4),
+#         "use_score_threshold": bool(s.get("USE_SCORE_THRESH", False)),
+#         "score_threshold": float(s.get("SCORE_THRESH", 0.4) or 0.4),
+#         "use_per_source_cap": bool(s.get("USE_SOURCE_CAP", False)),
+#         "per_source_cap": int(s.get("PER_SOURCE_CAP", 2) or 2),
+#         "sanitize_retrieved": bool(s.get("SANITIZE_RETRIEVED", True)),
+#     }
 
-    # Never include secrets; if present, mark redacted.
-    if s.get("OPENAI_API_KEY"):
-        out["openai_key"] = "[REDACTED]"
+#     # Never include secrets; if present, mark redacted.
+#     if s.get("OPENAI_API_KEY"):
+#         out["openai_key"] = "[REDACTED]"
 
-    return out
+#     return out
 
 # --- Provider / fallback toast helper ---
 def render_provider_fallback_toast(reason: str, from_provider: str, to_provider: str):
@@ -268,7 +267,6 @@ def render_provider_fallback_toast(reason: str, from_provider: str, to_provider:
     Show a small, consistent toast when we auto-fallback providers.
     Keep it low-key on purpose (info-level).
     """
-    import streamlit as st
     msg = f"Switched from **{from_provider}** → **{to_provider}** automatically."
     if reason:
         msg += f" ({reason})"
