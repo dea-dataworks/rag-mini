@@ -1,3 +1,4 @@
+# Core app
 streamlit==1.36.*
 langchain==0.2.*
 langchain-community==0.2.*
@@ -5,13 +6,11 @@ langchain-ollama==0.1.*
 langchain-chroma==0.1.*
 chromadb>=1.0.8,<2.0
 pypdf==4.*
-pypika>=0.48.9
 python-docx>=0.8.11
 pandas>=2.0
 openpyxl>=3.1
 
-# for tests
-pytest>=8.0.0
+pypika>=0.48.9  
 
-# langchain-openai
-# openai
+# Tests
+pytest>=8.0.0

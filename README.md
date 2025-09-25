@@ -1,103 +1,120 @@
 # RAG Explorer
 
-A tiny, local Retrieval-Augmented Generation app (Streamlit + LangChain + Chroma + Ollama).  
+**A lightweight, local Retrieval-Augmented Generation app**  
+Built with Streamlit · LangChain · Chroma · Ollama  
 
-## Scope (v0.2) 
-Single‑turn Q&A over .txt/text‑PDFs, local only, no API keys.
-Not included: OCR/scanned PDFs, multi‑turn chat, web search.
-Models: Ollama mistral for answers, nomic-embed-text for embeddings.
+![demo screenshot or gif here once you capture one]
 
-## v0.2 Steps
-- Upload `.pdf` / `.txt`
-- Chunk → Embed (Ollama) → Index (Chroma)
-- Retrieve top‑k and answer with sources
-- Local‑only (no API keys)
+---
 
-## Prerequisites
-- Python 3.13 (tested). If you hit install issues on 3.13, try 3.12.
-- [Ollama](https://ollama.com) installed
-- If you plan to use OpenAI install with pip install -r requirements.txt openai langchain-openai.
+## Features (v0.2)
+
+- Upload `.pdf`, `.txt`, or `.docx` files.  
+- Build and manage local indexes (ChromaDB): inspect stats, delete/replace files, rebuild manifest.  
+- Answer questions with **cited sources** (Ollama mistral + nomic-embed-text).  
+- **Conversation mode**: toggle chat history, export full transcript to Markdown.  
+- Switch between **multiple indexes** (projects / datasets).  
+- **Provider toggle**: default Ollama, optional OpenAI with graceful fallback.  
+- **Guardrail banners**: inline warnings for no citations, thin context, prompt injection.  
+- **Advanced retrieval tuning**: BM25, Dense, Hybrid (RRF), score thresholds, MMR λ, per-source caps.  
+- **Exports**: per-turn and full session to Markdown, CSV, Excel, including provenance + guardrail notes.  
+- **Evaluation (retrieval quality)**: run QA sets across BM25 / Dense / Hybrid and see hit@k & MRR.  
+- **Local-only by default** — no API keys required.
+
+_Not included (yet): OCR/scanned PDFs, full web search._
+
+---
 
 ## Quickstart
-# Make sure Ollama is running (menu bar / system tray) before launching Streamlit.
+
+### Prerequisites
+- Python 3.12+ (tested on 3.12)  
+- [Ollama](https://ollama.com) installed and running  
+- Optional: [OpenAI](https://platform.openai.com) key for GPT models  
+
+### Installation
 
 ```bash
+# create virtual environment
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
 # macOS/Linux
 source .venv/bin/activate
 
-pip install --upgrade pip
+pip install -U pip
 pip install -r requirements.txt
 
-# pull models 
+# pull models (one-time)
 ollama pull mistral
 ollama pull nomic-embed-text
+```
 
+### Optional: OpenAI provider support
+
+By default the app runs fully local with Ollama. To enable **OpenAI** models:
+
+```bash
+pip install -r requirements-openai.txt
+# set your key (mac/linux)
+export OPENAI_API_KEY=sk-...
+# or (Windows PowerShell)
+setx OPENAI_API_KEY "sk-..."
+```
+
+Then select **OpenAI** in the provider dropdown. If the key is missing or invalid, 
+the app will automatically fall back to Ollama and show a small toast.
+
+
+### Run the app
+```bash
 streamlit run app.py
 ```
 
+Open [http://localhost:8501](http://localhost:8501) in your browser.
+
+---
+
+## Testing
+
+Minimal test suite with `pytest` is included:
+
+```bash
+pytest -q
+```
+
+Runs in <2s against small fixture corpus (`tests/fixtures`).  
+A fuller manual checklist is in [TESTING.md](./TESTING.md).
+
+---
+
 ## Troubleshooting
 
-- **“Index build failed: … Could not initialize embeddings for 'nomic-embed-text'”**  
-Ollama model isn’t available. Run:
+- **Embedding init failed** → `ollama pull nomic-embed-text mistral` and ensure Ollama is running.  
+- **No vector store found** → Upload files, then click **Build / Load Index**.  
+- **Empty answers from PDFs** → Likely scanned images; this app only extracts text. Run OCR first.  
+- **DOCX import errors** → Ensure `python-docx` is installed (already in `requirements.txt`).  
+- **Stale index issues** → Delete `rag_store/` and rebuild.  
+- **Port already in use** → Run `streamlit run app.py --server.port 8502`.  
+- **Install conflicts** → Prefer Python 3.12, use pinned versions in `requirements.txt`.  
 
+---
+
+## Project Structure
 ```
-ollama pull nomic-embed-text
-ollama pull mistral
- ```
-
-Make sure the Ollama service is running, then rebuild the index. (This error is raised from the embedding init in code.) 
-
-- **“No vector store found. Build the index first (Step 1).”**  
-Click **Build / Load Index** after uploading files. Then try your question again.
-
-- **“No results. Try a simpler question or rebuild the index.”**  
-Your query didn’t match the chunks. Try a simpler/shorter question or rebuild the index with more/larger documents.
-
-- **PDF uploaded but answer is empty / chunks look blank**  
-The PDF likely contains images (scanned) instead of text. This app uses text-only extraction via `pypdf`. Run OCR on the PDF, or use a text-based PDF. 
-
-- **Chroma directory issues or stale index**  
-Close the app, delete the local `rag_store/` directory, and rebuild the index. (It’s ignored by Git.) 
-
-```
-rm -rf rag_store # macOS/Linux
-rmdir /S /Q rag_store # Windows
+app.py              # Streamlit entry point
+rag_core.py         # core retrieval / prompt assembly
+llm_chain.py        # provider toggle, LLM client factory
+index_admin.py      # index building / switching / manifest
+exports.py          # export QA + provenance + sessions
+guardrails.py       # guardrail checks
+utils/              # settings, ui, helpers
+eval/               # eval snapshot scripts + qa.jsonl
+tests/              # pytest suite
+sample_data/        # demo files
 ```
 
-
-- **Port already in use**  
-Run Streamlit on another port:
-
-```
-streamlit run app.py --server.port 8502
-```
-
-- **Version conflicts during pip install**  
-If you hit resolver errors, try Python 3.12 and the pinned ranges in `requirements.txt`, then upgrade one-by-one if needed.
-
-## Tests
-
-This project includes a minimal pytest suite in the `tests/` folder.  
-The suite runs quickly (<2s) and uses a small built-in fixture corpus.
-
-### Running the tests
-
-From the repo root:
-
-**Linux / macOS**
-```
-PYTHONPATH=. pytest -q
-```
-
-**Windows PowerShell**
-```
-$env:PYTHONPATH="."; pytest -q
-```
-
+---
 
 ## License
-
-MIT — see LICENSE.
+MIT — see [LICENSE](./LICENSE).
