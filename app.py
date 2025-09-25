@@ -9,7 +9,9 @@ from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filt
                       make_fresh_index_dir, read_manifest)
 from guardrails import sanitize_chunks, pick_primary_status
 from index_admin import (
-    list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs
+    list_sources_in_vs, delete_source, add_or_replace_file, rebuild_manifest_from_vs,
+    list_indexes,  # NEW: names like ["user", "demo-A", "demo-B"]
+    get_active_index, set_active_index  # NEW: pointer helpers (per base)
 )
 from utils.settings import seed_session_from_settings, save_settings, apply_persisted_defaults
 from utils.ui import (sidebar_pipeline_diagram, render_export_buttons, render_copy_row , render_cited_chunks_expander,
@@ -37,6 +39,7 @@ st.caption("Local, simple Retrieval-Augmented Q&A (scope-first)")
 # ---------- SESSION DEFAULTS ----------
 st.session_state.setdefault("BASE_DIR", PERSIST_DIR)       # sidebar-selected base folder
 st.session_state.setdefault("ACTIVE_INDEX_DIR", None)      # specific subfolder in use (idx_YYYYMMDD_HHMMSS)
+st.session_state.setdefault("INDEX_NAME", "")              # "" -> default base (rag_store/)
 st.session_state.setdefault("OPENAI_API_KEY", "")
 st.session_state.setdefault("LLM_PROVIDER", "ollama")
 st.session_state.setdefault("LLM_MODEL", "mistral")
@@ -271,6 +274,71 @@ with clear_col:
         st.session_state["UPLOAD_KEY"] += 1  # re-key the widget -> clears files
         st.rerun()
 
+# ---------- INDEX SWITCHER (named bases) ----------
+# Lists named bases under rag_store/ (e.g., "user", "demo-A"). Switch updates BASE_DIR and reloads the active index pointer.
+with st.container(border=True):
+    st.markdown("**Active index (base)**")
+
+    try:
+        # Discover existing bases; ensure current is present in the options
+        existing = list_indexes(root=PERSIST_DIR) or []
+    except Exception:
+        existing = []
+
+    # Current selection comes from session (fallback to basename of BASE_DIR)
+    cur_base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
+    cur_name = st.session_state.get("INDEX_NAME", "") or (os.path.basename(cur_base_dir) if os.path.basename(cur_base_dir) != "" else "")
+
+    options = sorted({cur_name, *existing})
+    sel = st.selectbox(
+        "Choose a named index",
+        options=options if options else [""],
+        index=(options.index(cur_name) if cur_name in options else 0),
+        help="Switch among named bases under rag_store/. Each base can have multiple timestamped sub-indexes."
+    )
+
+    # On change: update session + pointer + load the active index for that base
+    if sel != cur_name:
+        # 1) Point BASE_DIR to the selected base folder
+        new_base_dir = os.path.join(PERSIST_DIR, sel) if sel else PERSIST_DIR
+        os.makedirs(new_base_dir, exist_ok=True)
+        st.session_state["INDEX_NAME"] = sel
+        st.session_state["BASE_DIR"] = new_base_dir
+
+        # 2) Invalidate any cached resources tied to the previous index
+        try:
+            st.cache_data.clear()
+            st.cache_resource.clear()
+        except Exception:
+            pass
+
+        # 3) Load its active pointer (fallback to latest) and bind st.session_state["vs"]
+        from rag_core import read_active_pointer, find_latest_index_dir, save_active_pointer, load_vectorstore_if_exists
+        pointer = read_active_pointer(new_base_dir) or find_latest_index_dir(new_base_dir)
+
+        if pointer:
+            with st.spinner("Switching index…"):
+                vs_sw = load_vectorstore_if_exists(embed_model=EMBED_MODEL, persist_dir=pointer)
+            if vs_sw is not None:
+                st.session_state["vs"] = vs_sw
+                st.session_state["ACTIVE_INDEX_DIR"] = pointer
+                # Persist pointer for this base
+                save_active_pointer(new_base_dir, pointer)
+                # Optional: mirror into index_admin pointer store if implemented
+                try:
+                    set_active_index(base=new_base_dir, active_dir=pointer)
+                except Exception:
+                    pass
+                st.success(f"Active index switched → `{sel or 'default'}`")
+            else:
+                st.session_state["vs"] = None
+                st.session_state["ACTIVE_INDEX_DIR"] = None
+                st.warning("No active sub-index found in the selected base. Build or load one below.")
+
+        else:
+            st.session_state["vs"] = None
+            st.session_state["ACTIVE_INDEX_DIR"] = None
+            st.info("This base has no indices yet. Rebuild from uploads to create one.")
 
 # ---------- INDEX BUILD (M1) ----------
 # --- Build / Load controls ---
