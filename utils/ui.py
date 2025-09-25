@@ -3,7 +3,6 @@ import uuid
 import streamlit.components.v1 as components
 import streamlit as st
 from exports import to_markdown, to_csv_bytes, to_excel_bytes, chat_to_markdown
-from utils.settings import get_exportable_settings
 
 def render_copy_button(label: str, text: str, key: str | None = None):
     _key = key or str(uuid.uuid4()).replace("-", "")
