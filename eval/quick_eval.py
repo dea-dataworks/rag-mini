@@ -1,7 +1,10 @@
+import os
 import json
 import pandas as pd
 from langchain_core.documents import Document
-from rag_core import retrieve, load_vectorstore_if_exists  # uses your core helpers  :contentReference[oaicite:0]{index=0}
+from index_admin import get_active_index
+from rag_core import retrieve, load_vectorstore_if_exists  # uses your core helpers
+
 
 def _tag(d: Document) -> str:
     m = d.metadata or {}
@@ -37,14 +40,28 @@ def _hit_mrr(gold_tags, ranked_docs, k: int):
     mrr = 1.0 / first_rank if first_rank is not None else 0.0
     return hit_at_k, mrr
 
+def _resolve_active_dir(persist_dir: str) -> str | None:
+    """
+    If 'persist_dir' is a base (e.g., rag_store/user), return its active idx_* dir.
+    If it's already an idx_* folder, return it as-is.
+    """
+    base = os.path.basename(persist_dir.rstrip(os.sep))
+    if base.startswith("idx_"):
+        return persist_dir
+    return get_active_index(base=persist_dir)
+
 def run_quick_eval(qpath: str, k_eval: int, mmr_lambda: float, embed_model: str, persist_dir: str = "rag_store"):
     qa_rows = _read_jsonl(qpath)
     if not qa_rows:
         return pd.DataFrame(), {"msg": "No questions", "k": k_eval}
 
-    vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=persist_dir)
+    active_dir = _resolve_active_dir(persist_dir)
+    if not active_dir:
+        return pd.DataFrame(), {"msg": f"No active index under base '{persist_dir}'", "k": k_eval}
+
+    vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=active_dir)
     if vs is None:
-        return pd.DataFrame(), {"msg": f"No index at '{persist_dir}'", "k": k_eval}
+        return pd.DataFrame(), {"msg": f"No index at '{active_dir}'", "k": k_eval}
 
     rows = []
     for i, ex in enumerate(qa_rows, start=1):

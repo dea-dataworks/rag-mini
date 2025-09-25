@@ -1,11 +1,11 @@
+import os
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
-
 import pandas as pd
 from langchain_core.documents import Document
-
+from index_admin import get_active_index
 from rag_core import load_vectorstore_if_exists, get_embeddings, retrieve
 
 @dataclass
@@ -55,6 +55,16 @@ def _rank_of_first_match(docs: List[Document], gold_source: Optional[str], gold_
             return i
     return None
 
+def _resolve_active_dir(persist_dir: str) -> str | None:
+    """
+    If 'persist_dir' is a base (e.g., rag_store/user), return its active idx_* dir.
+    If it's already an idx_* folder, return it as-is.
+    """
+    base = os.path.basename(persist_dir.rstrip(os.sep))
+    if base.startswith("idx_"):
+        return persist_dir
+    return get_active_index(base=persist_dir)
+
 def run_eval_snapshot(
     qa_path: str | Path,
     persist_dir: str,
@@ -62,16 +72,12 @@ def run_eval_snapshot(
     modes: List[str],            # ["bm25","hybrid","dense"] any subset
     k: int = 5,
 ) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
-    """
-    Returns:
-      summary_df: index=mode, columns=["n","hit@k","mrr"]
-      details_by_mode: dict[mode]-> DataFrame with per-question ranks/hits
-    """
-    qa = _load_qa_jsonl(qa_path)
-    if not qa:
+    ...
+    active_dir = _resolve_active_dir(persist_dir)
+    if not active_dir:
         return pd.DataFrame(), {}
 
-    vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=persist_dir)
+    vs = load_vectorstore_if_exists(embed_model=embed_model, persist_dir=active_dir)
     if vs is None:
         # graceful empty result if there is no active index
         return pd.DataFrame(), {}
@@ -79,10 +85,13 @@ def run_eval_snapshot(
     results_summary = []
     details_by_mode: Dict[str, pd.DataFrame] = {}
 
+    qa_items = _load_qa_jsonl(qa_path)
+
     for mode in modes:
         rows = []
-        for item in qa:
+        for item in qa_items:
             pairs = retrieve(vs, item.question, k=k, mode=mode)
+
             docs = [d for (d, _s) in pairs]
             rank = _rank_of_first_match(docs, item.source, item.page)
             hit = 1 if rank is not None else 0
