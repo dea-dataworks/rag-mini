@@ -24,10 +24,10 @@ from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOU
 
 
 # ---------- CONFIG ----------
-APP_TITLE = "RAG Mini"
+APP_TITLE = "RAG Explorer"
 EMBED_MODEL = "nomic-embed-text"
 
-st.set_page_config(page_title="RAG Mini", layout="wide")
+st.set_page_config(page_title="RAG Explorer", layout="wide")
 # Load last-used settings into session (persisted in settings.json)
 seed_session_from_settings(st)
 apply_persisted_defaults(st)
