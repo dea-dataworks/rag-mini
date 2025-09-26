@@ -72,7 +72,7 @@ def run_eval_snapshot(
     modes: List[str],            # ["bm25","hybrid","dense"] any subset
     k: int = 5,
 ) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
-    ...
+
     active_dir = _resolve_active_dir(persist_dir)
     if not active_dir:
         return pd.DataFrame(), {}

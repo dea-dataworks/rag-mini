@@ -746,7 +746,12 @@ with st.container(border=True):
                         st.markdown(f"**A{i}:** {t.get('answer','')}")
                         # tiny source badge line (optional)
                         if t.get("sources"):
-                            st.caption("Sources: " + "; ".join({s.get('tag', s.get('source','src')) for s in t["sources"] if isinstance(s, dict)}))
+                            # st.caption("Sources: " + "; ".join({s.get('tag', s.get('source','src')) for s in t["sources"] if isinstance(s, dict)}))
+                            st.caption("Sources: " + "; ".join(dict.fromkeys(
+                                [(s.get("tag") or s.get("source") or "src") + (f" p.{s.get('page')}" if s.get("page") is not None else "")
+                                for s in t.get("sources", []) if isinstance(s, dict)]
+                            )))
+
 
                     # Tools row under Chat (History): Clear + Export
                     c1, c2 = st.columns([1, 1])
