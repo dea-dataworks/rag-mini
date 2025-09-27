@@ -1,7 +1,7 @@
 # RAG Explorer
 
 **A lightweight, local Retrieval-Augmented Generation app**  
-Built with Streamlit · LangChain · Chroma · Ollama  
+Built with Streamlit · LangChain · FAISS · Ollama
 
 ![demo screenshot or gif here once you capture one]
 
@@ -10,7 +10,7 @@ Built with Streamlit · LangChain · Chroma · Ollama
 ## Features (v0.2)
 
 - Upload `.pdf`, `.txt`, or `.docx` files.  
-- Build and manage local indexes (ChromaDB): inspect stats, delete/replace files, rebuild manifest.  
+- Build and manage local indexes (FAISS): inspect stats, delete/replace files, rebuild manifest. 
 - Answer questions with **cited sources** (Ollama mistral + nomic-embed-text).  
 - **Conversation mode**: toggle chat history, export full transcript to Markdown.  
 - Switch between **multiple indexes** (projects / datasets).  
