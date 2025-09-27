@@ -1,9 +1,8 @@
 from typing import Tuple
 import os
 from langchain_core.documents import Document
-
 from rag_core import (
-    _get_all_docs_from_chroma,   # full-corpus read (best-effort)
+    _get_all_docs_from_vs,       # full-corpus read (best-effort)
     read_pdf_pages, read_docx, read_txt,
     chunk_documents,
     write_manifest,
@@ -11,17 +10,19 @@ from rag_core import (
     read_active_pointer, save_active_pointer, find_latest_index_dir,
 )
 
+
 from utils.settings import PERSIST_DIR
 # ---------- Public API ----------
 
 def list_sources_in_vs(vs) -> list[str]:
     """Unique 'source' values present in the current collection."""
-    docs = _get_all_docs_from_chroma(vs)
+    docs = _get_all_docs_from_vs(vs)
     return sorted({(d.metadata or {}).get("source", "unknown") for d in docs})
 
 def delete_source(persist_dir_or_vs, source: str, *, embed_model: str = "nomic-embed-text") -> bool:
     """
     Delete all chunks whose metadata.source == source.
+    Works with FAISS by deleting docstore IDs that match the source.
     Accepts either a vectorstore object or a persist_dir path.
     Returns True if, after the call, no chunks with that source remain.
     """
@@ -31,17 +32,38 @@ def delete_source(persist_dir_or_vs, source: str, *, embed_model: str = "nomic-e
     if vs is None:
         return False
 
+    # Collect matching docstore IDs
+    ids_to_delete = []
     try:
-        vs.delete(where={"source": source})
+        ds = getattr(vs, "docstore", None)
+        store = getattr(ds, "_dict", None)
+        if store:
+            for k, d in store.items():
+                md = getattr(d, "metadata", {}) or {}
+                if md.get("source") == source:
+                    ids_to_delete.append(k)
     except Exception:
-        # Some langchain-chroma versions expose the underlying collection
+        pass
+
+    if ids_to_delete:
         try:
-            vs._collection.delete(where={"source": source})
+            # FAISS supports delete by ids (docstore keys)
+            vs.delete(ids_to_delete)
+        except Exception:
+            # Best-effort: ignore if backend doesn’t support delete
+            pass
+
+        # Persist changes if possible
+        try:
+            save_fn = getattr(vs, "save_local", None)
+            base = getattr(vs, "_persist_directory", None)
+            if callable(save_fn) and base:
+                save_fn(base)
         except Exception:
             pass
 
-    # Verify removal via quick scan
-    remaining = [d for d in _get_all_docs_from_chroma(vs) if (d.metadata or {}).get("source") == source]
+    # Verify by rescanning
+    remaining = [d for d in _get_all_docs_from_vs(vs) if (d.metadata or {}).get("source") == source]
     return len(remaining) == 0
 
 def recount_stats(vs) -> dict:
@@ -49,7 +71,7 @@ def recount_stats(vs) -> dict:
     Recompute {'num_docs','num_chunks','sources','per_file'} by scanning the collection.
     'num_docs' means distinct files (sources).
     """
-    docs = _get_all_docs_from_chroma(vs)
+    docs = _get_all_docs_from_vs(vs)
     per_file = {}
     page_set = {}
     chunk_count = {}
@@ -148,6 +170,15 @@ def add_or_replace_file(
 
     # 3) add to existing vs
     vs.add_documents(chunks)
+
+    # Persist if possible (FAISS)
+    try:
+        save_fn = getattr(vs, "save_local", None)
+        base = getattr(vs, "_persist_directory", None)
+        if callable(save_fn) and base:
+            save_fn(base)
+    except Exception:
+        pass
     return del_ok, len(chunks)
 
 # ---------- Index pointer API (new) ----------
