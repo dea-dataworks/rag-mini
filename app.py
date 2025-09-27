@@ -31,9 +31,7 @@ st.set_page_config(page_title="RAG Explorer", layout="wide")
 seed_session_from_settings(st)
 apply_persisted_defaults(st)
 st.title(APP_TITLE)
-st.caption("○ Your files are chunked, embedded, and indexed for retrieval. ○ Answers cite the top-scored chunks. ○ Flow: Upload → Build/Load → Ask")
-
-
+st.caption("○ Your files are chunked, embedded, and indexed for retrieval (FAISS). ○ Answers cite top-scored chunks. ○ Flow: Upload → Build/Load → Ask")
 
 # ---------- SESSION DEFAULTS ----------
 st.session_state.setdefault("BASE_DIR", PERSIST_DIR)       # sidebar-selected base folder
@@ -146,7 +144,7 @@ with st.sidebar:
         use_hybrid = st.checkbox(
             "Hybrid retrieval (BM25 + Dense via RRF)",
             value=False,
-            help="BM25 over chunk text + dense (Chroma). Results fused by Reciprocal Rank Fusion."
+            help="BM25 over chunk text + dense (FAISS). Results fused by Reciprocal Rank Fusion."
         )
         st.session_state["RETRIEVE_MODE"] = "hybrid" if use_hybrid else "dense"
 
