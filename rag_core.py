@@ -2,7 +2,7 @@ from typing import List, Tuple
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import FAISS
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 from collections import defaultdict  
@@ -85,23 +85,22 @@ def _rrf_fuse(
     fused = sorted(acc.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
     return [(pick[key], fused_score) for key, fused_score in fused]
 
-def _get_all_docs_from_chroma(vs) -> List[Document]:
+def _get_all_docs_from_vs(vs) -> List[Document]:
     """
-    Try to read the full corpus from Chroma.
-    Falls back to empty list if the backend doesn’t support a full dump.
+    Try to read the full corpus from the vectorstore.
+    - For FAISS: read from the in-memory docstore if available.
+    - Otherwise: return [], and caller will fall back to dense candidates.
     """
+    # FAISS keeps documents in an in-memory docstore when loaded/built via LangChain.
+    # We avoid tight coupling, but use a best-effort read.
     try:
-        raw = vs.get(include=["documents", "metadatas", "ids"])
+        ds = getattr(vs, "docstore", None)
+        if ds and hasattr(ds, "_dict"):
+            # Values are already LangChain Documents
+            return list(ds._dict.values())
     except Exception:
-        try:
-            raw = vs._collection.get(include=["documents", "metadatas", "ids"])
-        except Exception:
-            return []
-    docs = []
-    for text, meta in zip(raw.get("documents", []) or [], raw.get("metadatas", []) or []):
-        docs.append(Document(page_content=text or "", metadata=meta or {}))
-    return docs
-
+        pass
+    return []
 
 def _ensure_bm25_for_vs(vs, candidate_docs: List[Document] | None = None) -> SimpleBM25:
     """
@@ -113,7 +112,7 @@ def _ensure_bm25_for_vs(vs, candidate_docs: List[Document] | None = None) -> Sim
     key = getattr(vs, "_persist_directory", None) or str(id(vs))
     if key in _BM25_CACHE:
         return _BM25_CACHE[key]
-    corpus = _get_all_docs_from_chroma(vs)
+    corpus = _get_all_docs_from_vs(vs)
     bm25 = SimpleBM25(corpus)
     _BM25_CACHE[key] = bm25
     return bm25
@@ -255,17 +254,33 @@ def get_embeddings(model_name: str):
     
 def build_or_load_vectorstore(chunks, embedding, persist_dir: str):
     """
-    Build a Chroma vector store when chunks are provided (embeds & persists).
-    If chunks is empty, return a handle to an existing store (no embedding).
-    Note: Newer langchain-chroma persists on create; no .persist() method exists.
+    FAISS version:
+      - If chunks provided: build in-memory, then save_local(persist_dir).
+      - If no chunks: load_local(persist_dir) with the same embedding.
+    We also attach _persist_directory so BM25 cache keys remain stable.
     """
     if chunks and len(chunks) > 0:
-        # Creates/updates a persisted collection immediately.
-        return Chroma.from_documents(
-            chunks, embedding=embedding, persist_directory=persist_dir
+        vs = FAISS.from_documents(chunks, embedding)
+        # Persist to disk
+        os.makedirs(persist_dir, exist_ok=True)
+        vs.save_local(persist_dir)
+        # Attach for BM25 cache keying
+        setattr(vs, "_persist_directory", persist_dir)
+        return vs
+
+    # Load an existing FAISS index
+    try:
+        vs = FAISS.load_local(
+            persist_dir,
+            embeddings=embedding,
+            allow_dangerous_deserialization=True,  # needed for many FAISS builds
         )
-    # Open existing collection (no embed pass)
-    return Chroma(embedding_function=embedding, persist_directory=persist_dir)
+        setattr(vs, "_persist_directory", persist_dir)
+        return vs
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not load FAISS index from '{persist_dir}'. Build it first."
+        ) from e
 
 # --- post-retrieval helpers (UI-agnostic) ---
 
@@ -359,7 +374,7 @@ def retrieve(
         return [(d, score_map.get(d.page_content)) for d in mmr_docs]
 
     # Get BM25 index over entire corpus or over dense candidates as a fallback
-    full_corpus = _get_all_docs_from_chroma(vs)
+    full_corpus = _get_all_docs_from_vs(vs)
     bm25_index = _ensure_bm25_for_vs(
         vs,
         candidate_docs=[d for (d, _s) in dense_results] if not full_corpus else None,
@@ -377,12 +392,18 @@ def retrieve(
 
 # --- load existing store on app start ---
 def load_vectorstore_if_exists(embed_model: str, persist_dir: str):
-    """Try to open an existing Chroma store; return vs or None."""
+    """Try to open an existing FAISS store; return vs or None."""
     if not os.path.exists(persist_dir):
         return None
     embedding = OllamaEmbeddings(model=embed_model)
     try:
-        return Chroma(embedding_function=embedding, persist_directory=persist_dir)
+        vs = FAISS.load_local(
+            persist_dir,
+            embeddings=embedding,
+            allow_dangerous_deserialization=True,
+        )
+        setattr(vs, "_persist_directory", persist_dir)
+        return vs
     except Exception:
         return None
     
@@ -403,7 +424,7 @@ def build_index_from_files(
       1) Convert uploaded files -> Documents
       2) Split documents into chunks
       3) Get embeddings
-      4) Build/load Chroma vector store and persist it
+      4) Build/load FAISS vector store and persist it
     """
     # Back-compat: accept both 'uploaded_files' and 'files'
     uploaded_files = uploaded_files if uploaded_files is not None else files
