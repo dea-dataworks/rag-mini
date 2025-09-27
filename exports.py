@@ -81,9 +81,6 @@ def to_markdown(qa: Dict, snippet_max: int = 500) -> str:
         if meta.get("fallback_reason"):
             header.append(f"- **Reason:** {meta.get('fallback_reason')}")
 
-
-
-
     # Add citations line if present
     citations = qa.get("citations", []) or []
     if citations:
