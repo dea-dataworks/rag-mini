@@ -22,6 +22,10 @@ DEFAULT_SETTINGS = {
     "index_name": "user",
 }
 
+# UI bounds for the “Why this answer” panel (optional; ui.py auto-falls back)
+WHY_PANEL_MIN = 3
+WHY_PANEL_MAX = 5
+
 def load_settings() -> dict:
     """Load settings.json merged over DEFAULT_SETTINGS. Safe on decode errors."""
     if os.path.exists(SETTINGS_PATH):
