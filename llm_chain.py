@@ -1,4 +1,3 @@
-from typing import Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from guardrails import GUARDRAIL_SYSTEM, has_citation, FALLBACK_NO_CITATION
 from rag_core import load_vectorstore_if_exists, retrieve
