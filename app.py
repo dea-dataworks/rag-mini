@@ -119,23 +119,27 @@ with st.sidebar:
     with st.expander("Advanced", expanded=False):
         st.markdown("**Provider**")
 
-        default_use_openai = (st.session_state.get("LLM_PROVIDER", "ollama") == "openai")
-        use_openai = st.checkbox("Use OpenAI (cloud)", value=default_use_openai,
-                                help="Default stays local with Ollama/mistral.")
+        # --- Provider select (safe defaulting) ---
+        use_openai = st.checkbox(
+            "Use OpenAI (cloud)",
+            value=(st.session_state.get("LLM_PROVIDER", "ollama") == "openai"),
+            help="Default stays local with Ollama/mistral."
+        )
 
         if use_openai:
-            # API key + model select only when enabled
             openai_key = st.text_input("OpenAI API Key", type="password")
-            if openai_key:
+            key_ok = bool(openai_key and openai_key.strip())
+            if key_ok:
                 st.session_state["OPENAI_API_KEY"] = openai_key.strip()
-            disabled = not bool(st.session_state.get("OPENAI_API_KEY"))
-            if disabled:
+                llm_model = st.selectbox("OpenAI model", ["gpt-4o-mini", "gpt-4o"], index=0)
+                st.session_state["LLM_PROVIDER"] = "openai"
+                st.session_state["LLM_MODEL"]    = llm_model
+            else:
                 st.info("Enter a valid OpenAI key to enable models.", icon="🔐")
-            llm_model = st.selectbox("OpenAI model", ["gpt-4o-mini", "gpt-4o"], index=0, disabled=disabled)
-            st.session_state["LLM_PROVIDER"] = "openai"
-            st.session_state["LLM_MODEL"]    = llm_model
+                # force-safe local default if no key
+                st.session_state["LLM_PROVIDER"] = "ollama"
+                st.session_state["LLM_MODEL"]    = "mistral"
         else:
-            # Local default
             llm_model = st.selectbox("Ollama model", ["mistral"], index=0)
             st.session_state["LLM_PROVIDER"] = "ollama"
             st.session_state["LLM_MODEL"]    = llm_model
@@ -356,7 +360,7 @@ with st.container(border=True):
                     try:
                         # Each build creates a fresh timestamped subfolder under BASE_DIR
                         active_dir = make_fresh_index_dir(base_dir)
-                        vs_new = build_index_from_files(
+                        vs_new, _ = build_index_from_files(
                             files=uploaded_files,
                             persist_dir=active_dir,
                             embed_model=EMBED_MODEL,
@@ -638,7 +642,7 @@ with st.container(border=True):
                 try:
                     qa = build_qa_result(
                         question=question,
-                        answer=answer,
+                         answer=answer_text,
                         docs_used=docs_only,        # sanitized docs actually sent to the LLM
                         pairs=norm,                 # normalized [(Document, score)] used for ranking
                         meta={
