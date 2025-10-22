@@ -412,11 +412,12 @@ with st.container(border=True):
                 if per_file:
                     rows = []
                     for f in per_file:
+                        print("DEBUG per_file:", type(per_file), per_file)
                         rows.append({
-                            "source": f.get("source", ""),
-                            "pages": f.get("pages", None),
-                            "chunks": f.get("chunks", 0),
-                            "size_kb": round((f.get("bytes", 0) or 0) / 1024, 1),
+                            "source": f.get("source", "") if isinstance(f, dict) else str(f),
+                            "pages": f.get("pages", None) if isinstance(f, dict) else None,
+                            "chunks": f.get("chunks", 0) if isinstance(f, dict) else 0,
+                            "size_kb": round((f.get("bytes", 0) or 0) / 1024, 1) if isinstance(f, dict) else 0,
                         })
                     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
