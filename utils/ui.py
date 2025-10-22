@@ -168,19 +168,19 @@ def render_dev_metrics(qa: dict):
         if times:
             st.markdown("**Timings (ms)**")
             t_rows = [{"Step": k, "ms": v} for k, v in times.items()]
-            st.dataframe(t_rows, use_container_width=True, hide_index=True)
+            st.dataframe(t_rows, width='stretch', hide_index=True)
 
         if scores:
             st.markdown("**Score stats**")
             s_rows = [{"Stat": k, "Value": v} for k, v in scores.items()]
-            st.dataframe(s_rows, use_container_width=True, hide_index=True)
+            st.dataframe(s_rows, width='stretch', hide_index=True)
 
         vals = [
             r.get("score") for r in qa.get("retrieved_chunks", [])
             if isinstance(r.get("score"), (float, int))
         ]
         if vals:
-            st.bar_chart(vals, use_container_width=True, height=120)
+            st.bar_chart(vals, width='stretch', height=120)
 
 def render_session_export(chat_history, idx_label: str):
     """Render a download button for the full chat transcript with provenance."""

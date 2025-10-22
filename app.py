@@ -270,7 +270,7 @@ with st.container(border=True):
     # One-time UX note for PDFs
     render_pdf_limit_note_for_uploads(uploaded_files)
 
-    if st.button("Clear uploads", use_container_width=True):
+    if st.button("Clear uploads", width='stretch'):
         st.session_state["UPLOAD_KEY"] += 1
         st.rerun()
 
@@ -342,7 +342,7 @@ with st.container(border=True):
         value=False,
         help="ON = fresh index in a new folder. OFF = load last active index.",
     )
-    build_btn = st.button("Build / Load Index", type="primary", use_container_width=True, help="Create a fresh index or load the last active one.")
+    build_btn = st.button("Build / Load Index", type="primary", width='stretch', help="Create a fresh index or load the last active one.")
 
     if build_btn:
         active_dir = None
@@ -419,14 +419,14 @@ with st.container(border=True):
                             "chunks": f.get("chunks", 0) if isinstance(f, dict) else 0,
                             "size_kb": round((f.get("bytes", 0) or 0) / 1024, 1) if isinstance(f, dict) else 0,
                         })
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
                 st.markdown("**Manage files**")
                 c1, c2 = st.columns([1, 1])
 
                 with c1:
                     del_src = st.text_input("Delete by exact source name", placeholder="e.g., sample_data/udhr.pdf")
-                    if st.button("Delete source", use_container_width=True, disabled=(not del_src)):
+                    if st.button("Delete source", width='stretch', disabled=(not del_src)):
                         try:
                             deleted = delete_source(active_dir, del_src)
                             if deleted:
@@ -439,7 +439,7 @@ with st.container(border=True):
 
                 with c2:
                     rep_file = st.file_uploader("Add/replace a file", type=["pdf","txt","docx"], accept_multiple_files=False, key="replace_file")
-                    if rep_file and st.button("Add / Replace", use_container_width=True):
+                    if rep_file and st.button("Add / Replace", width='stretch'):
                         try:
                             added = add_or_replace_file(active_dir, rep_file)
                             if added:
@@ -471,8 +471,8 @@ with st.container(border=True):
     question = st.session_state.get("QUESTION", "").strip()
 
     # answer and preview buttons
-    answer_btn = st.button("Retrieve & Answer", type="primary", use_container_width=True)
-    preview_btn = st.button("Preview Top Sources", use_container_width=True, help="Inspect retrieved chunks before answering.")
+    answer_btn = st.button("Retrieve & Answer", type="primary", width='stretch')
+    preview_btn = st.button("Preview Top Sources", width='stretch', help="Inspect retrieved chunks before answering.")
 
     vs = st.session_state.get("vs")
 
@@ -499,7 +499,7 @@ with st.container(border=True):
                 with st.expander("Preview — Top sources", expanded=True):
                     st.markdown("**Chunk Inspector**")
                     rows = make_chunk_rows(norm, st.session_state.get("SNIPPET_LEN", 240))
-                    st.dataframe(rows, use_container_width=True)
+                    st.dataframe(rows, width='stretch')
 
                     # Sanitize retrieved chunks (Preview only)
                     docs_only = [d for (d, _) in norm]
@@ -801,7 +801,7 @@ with st.container(border=True):
                     on_change=_on_enter_chat
                 )
 
-                chat_go = st.button("Follow-up: Retrieve & Answer", use_container_width=True)
+                chat_go = st.button("Follow-up: Retrieve & Answer", width='stretch')
                 if chat_go or st.session_state.get("CHAT_TRIGGER_ANSWER"):
                     st.session_state["CHAT_TRIGGER_ANSWER"] = False
                     q = (st.session_state.get("CHAT_QUESTION") or "").strip()
@@ -830,7 +830,7 @@ with st.expander("Evaluation (retrieval quality)", expanded=False):
     with c3:
         qpath = st.text_input("Questions file", value="eval/qa.jsonl")
 
-    run_eval = st.button("Run eval", type="primary", use_container_width=True)
+    run_eval = st.button("Run eval", type="primary", width='stretch')
 
     if run_eval:
         persist_dir = st.session_state.get("ACTIVE_INDEX_DIR") or st.session_state.get("BASE_DIR", "rag_store")
@@ -859,7 +859,7 @@ with st.expander("Evaluation (retrieval quality)", expanded=False):
                     st.markdown(f"**{mode.upper()}**")
                     st.dataframe(
                         df[["question", "gold_source", "gold_page", "rank", "hit", "mrr"]],
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                     )
                     st.divider()
