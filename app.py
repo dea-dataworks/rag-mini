@@ -625,12 +625,7 @@ with st.container(border=True):
 
                     st.markdown("### Answer")
 
-                # Quick copy buttons (utils.ui) — build once, reuse
-                tags = build_citation_tags(docs_only) if docs_only else []
-                sources_line = "; ".join(tags) if tags else ""
-                render_copy_row(answer_text, sources_line)
-                if sources_line:
-                    st.caption("Sources: " + sources_line)
+       
 
                 # Optional badge about sanitization
                 if sanitize_stats.get("lines_dropped", 0) > 0:
@@ -667,6 +662,7 @@ with st.container(border=True):
                     )                
                     # Ensure guardrail statuses are present and pick a primary one for UI
                     statuses = qa.get("guardrail_statuses") or qa.get("guardrails") or []
+                    # --- Guardrail status handling ---
                     primary = qa.get("guardrail_primary_status")
                     if not primary:
                         primary = pick_primary_status(statuses) if statuses else {"code": "ok", "severity": "info", "message": "OK"}
@@ -677,18 +673,16 @@ with st.container(border=True):
                     st.info(f"Couldn’t package the Q&A for export: {e}")
                     qa = None
                 
-                # --- Guardrail banner + answer render (single source of truth) ---
+                # --- Answer render (no guardrail banner) ---
                 if qa:
-                    primary = qa.get(
-                        "guardrail_primary_status",
-                        {"code": "ok", "severity": "info", "message": "OK"}
-                    )
-                    render_guardrail_banner(primary)
+                    st.write(answer_text)
 
-                    if primary.get("code") == "no_context":
-                        st.info("Declined — not enough supporting context. Try rephrasing or uploading more relevant files.")
-                    else:
-                        st.write(answer_text)
+                # Quick copy buttons (utils.ui) — build once, reuse
+                tags = build_citation_tags(docs_only) if docs_only else []
+                sources_line = "; ".join(tags) if tags else ""
+                render_copy_row(answer_text, sources_line)
+                if sources_line:
+                    st.caption("Sources: " + sources_line)
 
                 # --- Why-this-answer panel (compact; always visible) ---
                 if qa:

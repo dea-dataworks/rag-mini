@@ -72,7 +72,7 @@ def render_copy_row(answer_text: str, citations_text: str):
     with c1:
         render_copy_button("Copy answer", answer_text or "", key="copy_answer_btn")
     with c2:
-        render_copy_button("Copy citations", citations_text or "", key="copy_cites_btn")
+        render_copy_button("Copy Sources", citations_text or "", key="copy_cites_btn")
 
 # --- Why-this-answer panel ---
 def render_why_this_answer(qa: dict, min_items: int = 3, max_items: int = 5):

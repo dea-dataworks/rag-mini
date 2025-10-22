@@ -151,18 +151,6 @@ def call_llm(
             # Both providers failed; surface the original + fallback error context.
             raise RuntimeError(f"{reason}; fallback(ollama) error: {e_fallback}") from e_fallback
 
-    # Post-answer guardrail: no citation pattern → return special fallback payload
-    if not has_citation(text):
-        # allow non-cited answers through, but tag them
-        return {
-            "text": text or FALLBACK_NO_CITATION,
-            "meta": {
-                "provider_used": provider_used,
-                "fallback": fallback,
-                "reason": reason if fallback else "no_citation_warn",
-            },
-        }
-
     return {
         "text": text,
         "meta": {
