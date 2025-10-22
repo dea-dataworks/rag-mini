@@ -153,12 +153,13 @@ def call_llm(
 
     # Post-answer guardrail: no citation pattern → return special fallback payload
     if not has_citation(text):
+        # allow non-cited answers through, but tag them
         return {
-            "text": FALLBACK_NO_CITATION,
+            "text": text or FALLBACK_NO_CITATION,
             "meta": {
                 "provider_used": provider_used,
-                "fallback": fallback,          # keep real fallback flag (usually False here)
-                "reason": reason if fallback else "no_citation",
+                "fallback": fallback,
+                "reason": reason if fallback else "no_citation_warn",
             },
         }
 
