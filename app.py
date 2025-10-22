@@ -29,7 +29,7 @@ from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOU
 APP_TITLE = "RAG Explorer"
 EMBED_MODEL = "nomic-embed-text"
 
-st.set_page_config(page_title="RAG Explorer", layout="wide")
+st.set_page_config(page_title="RAG Explorer", layout="centered")
 # Load last-used settings into session (persisted in settings.json)
 seed_session_from_settings(st)
 apply_persisted_defaults(st)
@@ -254,6 +254,7 @@ with st.sidebar:
 # ---------- STEP 1: UPLOAD DOCUMENTS ----------
 with st.container(border=True):
     st.subheader("1) Upload documents")
+    st.caption("Add your source files to prepare for indexing.")
 
     # resettable key so we can clear the uploader after a build
     if "UPLOAD_KEY" not in st.session_state:
@@ -276,6 +277,7 @@ with st.container(border=True):
 # ---------- STEP 2: MANAGE INDEX ----------
 with st.container(border=True):
     st.subheader("2) Manage index")
+    st.caption("Choose an existing index or rebuild one from the current uploads.")
 
     # --- Index Switcher (named bases) ---
     try:
@@ -452,7 +454,8 @@ with st.container(border=True):
 # ---------- STEP 3: Q&A ----------
 with st.container(border=True):
     st.subheader("3) Ask questions about your docs")
-    st.caption("Press Enter or click **Retrieve & Answer**.")
+    st.caption("Enter a query and retrieve answers with citations to source chunks.")
+    #st.caption("Press Enter or click **Retrieve & Answer**.")
 
     # fire answer on Enter
     st.session_state.setdefault("TRIGGER_ANSWER", False)
