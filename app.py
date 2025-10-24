@@ -24,6 +24,11 @@ from eval.run_eval import run_eval_snapshot
 from exports import chat_to_markdown
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("faiss.loader").setLevel(logging.WARNING)
+
 
 # ---------- CONFIG ----------
 APP_TITLE = "RAG Explorer"
@@ -81,6 +86,7 @@ if "vs" not in st.session_state:
 if st.session_state["vs"] is None:
     from rag_core import read_active_pointer, find_latest_index_dir
     base_dir = st.session_state.get("BASE_DIR", PERSIST_DIR)
+    logging.info(f"Loaded existing index from {base_dir}")
 
     # 1) Try saved pointer for this base
     active_dir = st.session_state.get("ACTIVE_INDEX_DIR") or read_active_pointer(base_dir)
@@ -271,6 +277,10 @@ with st.container(border=True):
         key=f"uploader_{st.session_state['UPLOAD_KEY']}",
     )
 
+    # logging info
+    if uploaded_files:
+        logging.info(f"Uploaded {len(uploaded_files)} file(s): {[f.name for f in uploaded_files]}")
+
     # One-time UX note for PDFs
     render_pdf_limit_note_for_uploads(uploaded_files)
 
@@ -360,6 +370,9 @@ with st.container(border=True):
                     try:
                         # Each build creates a fresh timestamped subfolder under BASE_DIR
                         active_dir = make_fresh_index_dir(base_dir)
+
+                        logging.info("Starting index build from uploaded files...")
+
                         vs_new, _ = build_index_from_files(
                             files=uploaded_files,
                             persist_dir=active_dir,
@@ -367,6 +380,9 @@ with st.container(border=True):
                             chunk_size=st.session_state.get("CHUNK_SIZE", 800),
                             chunk_overlap=st.session_state.get("CHUNK_OVERLAP", 120),
                         )
+
+                        logging.info(f"Index built successfully and saved to {active_dir}")
+
                     except Exception as e:
                         st.error(f"Build failed: {e}")
                         active_dir = None
@@ -416,7 +432,6 @@ with st.container(border=True):
                 if per_file:
                     rows = []
                     for f in per_file:
-                        print("DEBUG per_file:", type(per_file), per_file)
                         rows.append({
                             "source": f.get("source", "") if isinstance(f, dict) else str(f),
                             "pages": f.get("pages", None) if isinstance(f, dict) else None,
@@ -460,7 +475,6 @@ with st.container(border=True):
 with st.container(border=True):
     st.subheader("3) Ask questions about your docs")
     st.caption("Enter a query and retrieve answers with citations to source chunks.")
-    #st.caption("Press Enter or click **Retrieve & Answer**.")
 
     # fire answer on Enter
     st.session_state.setdefault("TRIGGER_ANSWER", False)
@@ -473,6 +487,8 @@ with st.container(border=True):
         on_change=_on_enter_answer
     )
     question = st.session_state.get("QUESTION", "").strip()
+    if question:
+        logging.info(f"Query: {question}")
 
     # answer and preview buttons
     answer_btn = st.button("Retrieve & Answer", type="primary", width='stretch')
@@ -527,6 +543,8 @@ with st.container(border=True):
                         hdr = f"Chunk {i} — {src}" + (f" p.{pg}" if pg else "") + (f"  [{cid}]" if cid else "")
                         with st.expander(hdr):
                             st.write(d.page_content)
+        if ok and hits_raw:
+            logging.info(f"📚 Retrieved {len(hits_raw)} raw hits in {t_retrieve:.1f} ms")
 
     if answer_btn or st.session_state.get("TRIGGER_ANSWER"):
         # reset the Enter-trigger for next time
@@ -596,6 +614,7 @@ with st.container(border=True):
                             openai_api_key=st.session_state.get("OPENAI_API_KEY"),
                         )
 
+                    logging.info("Calling LLM...")
                     t1 = time.perf_counter()
                     ok, answer, err = _attempt_with_timeout(_do_llm, LLM_TIMEOUT_S, retries=1)
                     t_llm = (time.perf_counter() - t1) * 1000  # ms
@@ -625,7 +644,10 @@ with st.container(border=True):
 
                     st.markdown("### Answer")
 
-       
+                if ok:
+                    logging.info(f"✅ LLM responded in {t_llm:.1f} ms")
+                else:
+                    logging.error(f"❌ LLM call failed: {err}")       
 
                 # Optional badge about sanitization
                 if sanitize_stats.get("lines_dropped", 0) > 0:
@@ -676,6 +698,7 @@ with st.container(border=True):
                 # --- Answer render (no guardrail banner) ---
                 if qa:
                     st.write(answer_text)
+                    logging.info("✅ Answer generated successfully")
 
                 # Quick copy buttons (utils.ui) — build once, reuse
                 tags = build_citation_tags(docs_only) if docs_only else []

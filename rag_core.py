@@ -9,6 +9,7 @@ from collections import defaultdict
 import io, os, re, math, json, time
 from utils.helpers import compute_score_stats
 from guardrails import evaluate_guardrails, pick_primary_status
+import logging
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
 _BM25_CACHE = {}  # key: persist_dir (str) -> SimpleBM25
@@ -430,16 +431,22 @@ def build_index_from_files(
     uploaded_files = uploaded_files if uploaded_files is not None else files
 
     docs, skipped = files_to_documents(uploaded_files or [])
+    logging.info(f"Loaded {len(docs)} documents (skipped {len(skipped)})")
+
     chunks = chunk_documents(docs, size=chunk_size, overlap=chunk_overlap)
+    avg_len = sum(len(c.page_content) for c in chunks) / len(chunks) if chunks else 0
+    logging.info(f"Created {len(chunks)} chunks (avg {avg_len:.1f} chars)")
     
     embedding = embedding_obj or get_embeddings(embed_model)
+    logging.info(f"Generating embeddings using {embed_model}...")
     
     vs = build_or_load_vectorstore(
         chunks=chunks,
         embedding=embedding,
         persist_dir=persist_dir,
     )
-    
+    logging.info(f"Index persisted to {persist_dir}")
+
     stats = {
         "num_docs": len(docs),
         "num_chunks": len(chunks),
