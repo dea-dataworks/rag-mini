@@ -1,7 +1,10 @@
 # RAG Explorer
 
-**A lightweight, local Retrieval-Augmented Generation app**  
-Built with Streamlit · LangChain · FAISS · Ollama
+**Retrieval-Augmented Generation app for local or API-based models**  
+Built with Streamlit · LangChain · FAISS · Ollama/OpenAI
+
+**Local Retrieval-Augmented Generation (RAG) Explorer**  
+A self-contained, Streamlit-based Q&A app with document citations and guardrails.
 
 ![demo screenshot or gif here once you capture one]
 
@@ -20,6 +23,8 @@ Built with Streamlit · LangChain · FAISS · Ollama
 - **Exports**: per-turn and full session to Markdown, CSV, Excel, including provenance + guardrail notes.  
 - **Evaluation (retrieval quality)**: run QA sets across BM25 / Dense / Hybrid and see hit@k & MRR.  
 - **Local-only by default** — no API keys required.
+- Runs fully local with Ollama (Mistral + nomic-embed-text) or remotely via OpenAI API.  
+- Switch provider seamlessly — automatic fallback to Ollama if OpenAI key is missing.  
 
 _Not included (yet): OCR/scanned PDFs, full web search._
 
