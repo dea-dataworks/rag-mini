@@ -22,7 +22,7 @@
 2. **Build Index** — Passes files to `rag_core.build_index_from_files()` which →  
    `files_to_documents()` → `chunk_documents()` → `get_embeddings()` → `build_or_load_vectorstore()` → FAISS save.  
 3. **Query** — User question from `st.text_input()` triggers retrieval.  
-4. **Retrieve** — `_retrieve_hits()` → `rag_core.retrieve()` → returns top-k chunks.  
+4. **Retrieve** — `retrieve_with_timeout()` → `rag_core.retrieve()` → returns top-k chunks.  
 5. **Filter & Prep** — Normalize hits, filter by score/cap, build snippet rows.  
 6. **Prompt Build** — `llm_chain.build_prompt()` merges retrieved text + question (+ history).  
 7. **LLM Call** — `llm_chain.call_llm()` sends to Ollama or OpenAI; retries once if needed.  
@@ -40,7 +40,7 @@
 | 4 | `rag_core.py` | `chunk_documents()` | Splits text into overlapping chunks with IDs. |
 | 5 | `rag_core.py` | `get_embeddings()` | Loads `OllamaEmbeddings` model. |
 | 6 | `rag_core.py` | `build_or_load_vectorstore()` | Builds FAISS index and saves it locally. |
-| 7 | `app.py` | `_retrieve_hits()` → `retrieve()` | Searches index for top-k similar chunks. |
+| 7 | `app.py` | `retrieve_with_timeout()` → `retrieve()` | Searches index for top-k similar chunks. |
 | 8 | `rag_core.py` | `retrieve()` | Performs dense, BM25, or hybrid retrieval. |
 | 9 | `app.py` | `build_prompt()` | Assembles LLM input from retrieved text. |
 |10 | `llm_chain.py` | `call_llm()` | Invokes LLM provider and returns answer text. |
@@ -76,3 +76,14 @@
 
 **Summary:**  
 RAG Explorer v0.2 implements a fully local retrieval-augmented generation workflow with strong engineering hygiene: modular codebase, explicit logging, guardrails, and reproducible FAISS storage. The critical path above defines the exact call sequence from upload to final answer.
+
+---
+
+## 6. System Diagram
+
+![RAG System Flow](rag_flow.png)
+
+**Caption:**  
+Assumes a local FAISS index stored under `/rag_store/idx_*`, with Mistral served via Ollama as the default backend.  
+Retrieval is limited to top *k* = 5 similar chunks, using local embeddings (`nomic-embed-text`).  
+Supports `.txt`, `.pdf`, and `.docx` files through the Streamlit upload interface.

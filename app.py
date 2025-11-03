@@ -1,34 +1,80 @@
+"""Streamlit front-end for the RAG Explorer app.
+
+Handles:
+1. Uploading and indexing documents.
+2. Managing and loading FAISS indexes.
+3. Query + retrieval + LLM answer generation.
+4. Basic evaluation snapshot for retrieval quality.
+"""
+
 import os
 import time
+import logging
+
 import pandas as pd
 import streamlit as st
-import guardrails
+
+from rag_core import (
+    load_vectorstore_if_exists,
+    retrieve,
+    normalize_hits,
+    filter_by_score,
+    cap_per_source,
+    make_chunk_rows,
+    build_index_from_files,
+    build_citation_tags,
+    build_qa_result,
+    make_fresh_index_dir,
+    read_manifest,
+)
 from llm_chain import build_prompt, call_llm
-from rag_core import (load_vectorstore_if_exists, retrieve, normalize_hits, filter_by_score, cap_per_source, make_chunk_rows,
-                      build_index_from_files, build_citation_tags, build_qa_result,
-                      make_fresh_index_dir, read_manifest)
-from guardrails import sanitize_chunks, pick_primary_status
+from guardrails import (
+    sanitize_chunks,
+    pick_primary_status,
+    scrub_context,
+    empty_or_thin_context,
+)
 from index_admin import (
-    delete_source, add_or_replace_file, rebuild_manifest_from_vs,
-    list_indexes,  
-    set_active_index)
+    delete_source,
+    add_or_replace_file,
+    rebuild_manifest_from_vs,
+    list_indexes,
+    set_active_index,
+)
 from utils.settings import (
-    seed_session_from_settings, save_settings, apply_persisted_defaults, PERSIST_DIR,
+    seed_session_from_settings,
+    save_settings,
+    apply_persisted_defaults,
+    PERSIST_DIR,
     get_exportable_settings,
 )
-from utils.ui import (render_export_buttons, render_copy_row , render_cited_chunks_expander,
-                    render_pdf_limit_note_for_uploads, render_pdf_limit_note_for_docs, render_why_this_answer,
-                    render_dev_metrics, render_session_export, render_guardrail_banner,
-                    render_provider_fallback_toast)
-from eval.run_eval import run_eval_snapshot
-from exports import chat_to_markdown
+from utils.ui import (
+    render_export_buttons,
+    render_copy_row,
+    render_cited_chunks_expander,
+    render_pdf_limit_note_for_uploads,
+    render_pdf_limit_note_for_docs,
+    render_why_this_answer,
+    render_dev_metrics,
+    render_session_export,
+    render_guardrail_banner,
+    render_provider_fallback_toast,
+)
 from utils.helpers import _attempt_with_timeout, RETRIEVAL_TIMEOUT_S, LLM_TIMEOUT_S
+from exports import chat_to_markdown
+from eval.run_eval import run_eval_snapshot
 
-import logging
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("faiss.loader").setLevel(logging.WARNING)
 
+# === TODOs / Future Refactor Notes ===
+# - Extract UI sections (upload, index, Q&A) into modular functions or classes.
+# - Move index build/load logic into rag_core.build_manager for reuse by API.
+# - Add proper logging levels (info/debug) and persistent logs to file.
+# - Integrate latency metrics (retrieval + LLM) into render_dev_metrics().
+# - Prepare for FastAPI endpoint wrapping (Week 8 production phase).
+# - Replace hardcoded model defaults with utils.settings.AppSettings model.
 
 # ---------- CONFIG ----------
 APP_TITLE = "RAG Explorer"
@@ -55,11 +101,12 @@ st.session_state.setdefault("max_history_turns", 4)  # small cap to avoid token 
 # ---------- HELPERS ----------
 @st.cache_resource
 def get_cached_embeddings(embed_model: str):
+    """Cache and reuse embedding model across sessions."""
     # calls your rag_core.get_embeddings under the hood
     from rag_core import get_embeddings
     return get_embeddings(embed_model)
 
-def _retrieve_hits(vs, question: str, top_k: int):
+def retrieve_with_timeout(vs, question: str, top_k: int):
     """
     One-shot retrieval with timeout + timing.
     Returns: (ok: bool, hits_raw: Any, t_retrieve_ms: float, err: Optional[str])
@@ -261,7 +308,8 @@ with st.sidebar:
         st.session_state["BASE_DIR"] = base_dir
         st.caption(f"Active base: `{base_dir}`")
 
-# ---------- STEP 1: UPLOAD DOCUMENTS ----------
+# === STEP 1: Upload documents ===
+logging.info("=== STEP 1: Upload documents ===")
 with st.container(border=True):
     st.subheader("1) Upload documents")
     st.caption("Add your source files to prepare for indexing.")
@@ -288,7 +336,8 @@ with st.container(border=True):
         st.session_state["UPLOAD_KEY"] += 1
         st.rerun()
 
-# ---------- STEP 2: MANAGE INDEX ----------
+# === STEP 2: Manage index ===
+logging.info("=== STEP 2: Manage index ===")
 with st.container(border=True):
     st.subheader("2) Manage index")
     st.caption("Choose an existing index or rebuild one from the current uploads.")
@@ -471,7 +520,8 @@ with st.container(border=True):
             else:
                 st.info("No manifest found for the active index. Rebuild to generate one.", icon="ℹ️")
 
-# ---------- STEP 3: Q&A ----------
+# === STEP 3: Q&A ===
+logging.info("=== STEP 3: Q&A ===")
 with st.container(border=True):
     st.subheader("3) Ask questions about your docs")
     st.caption("Enter a query and retrieve answers with citations to source chunks.")
@@ -503,7 +553,7 @@ with st.container(border=True):
             st.error("No vector store found. Build the index first (Step 1).")
         else:
             with st.spinner("Retrieving…"):
-                ok, hits_raw, t_retrieve, err = _retrieve_hits(vs, question, top_k)
+                ok, hits_raw, t_retrieve, err = retrieve_with_timeout(vs, question, top_k)
             if not ok:
                 st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
             elif not hits_raw:
@@ -555,7 +605,7 @@ with st.container(border=True):
             st.error("No vector store found. Build the index first (Step 1).")
         else:
             with st.spinner("Retrieving…"):
-                ok, hits_raw, t_retrieve, err = _retrieve_hits(vs, question, top_k)
+                ok, hits_raw, t_retrieve, err = retrieve_with_timeout(vs, question, top_k)
             if not ok:
                 st.info(f"Retrieval {err or 'failed'}. Try again, reduce Top-k, or rebuild the index.")
                 st.stop()
@@ -577,11 +627,11 @@ with st.container(border=True):
                     docs_only, sanitize_stats = sanitize_chunks(docs_only)
 
                 raw_context = "\n\n---\n\n".join(d.page_content for d in docs_only)
-                context_text, bad_lines = guardrails.scrub_context(raw_context)
+                context_text, bad_lines = scrub_context(raw_context)
 
 
                 # Early exit if too thin — show the guardrail banner then stop
-                if guardrails.empty_or_thin_context(context_text):
+                if empty_or_thin_context(context_text):
                     render_guardrail_banner({
                         "code": "no_context",
                         "severity": "block",
