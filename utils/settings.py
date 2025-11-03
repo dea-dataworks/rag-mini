@@ -1,4 +1,12 @@
-import json, os
+"""App-level configuration handling for RAG Explorer (load, save, and session seeding)."""
+
+import json
+import os
+
+# === TODOs / Future Refactor Notes ===
+# - Add schema validation using Pydantic or TypedDict.
+# - Support environment-specific overrides (e.g., dev/test/prod).
+# - Merge exportable settings with saved settings for one unified config view.
 
 PERSIST_DIR = os.getenv("RAG_PERSIST_DIR", "rag_store")
 
@@ -73,25 +81,6 @@ def apply_persisted_defaults(st):
     st.session_state.setdefault("INDEX_NAME", _lc.get("index_name", "user"))
 
 # --- Provenance / export config ---
-
-# # Keys we explicitly consider part of run_settings provenance.
-# EXPORTABLE_SETTINGS = [
-#     "model",
-#     "provider",
-#     "top_k",
-#     "retrieval_mode",
-#     "chunk_size",
-#     "chunk_overlap",
-#     "mmr_lambda",
-#     "use_history",
-#     "max_history_turns",
-#     # --- NEW (optional in exports) ---
-#     "guardrails_enabled",
-#     "guardrails_strict",
-#     "min_context_chars",
-#     # --- index name (non-secret) ---
-#     "index_name",
-# ]
 
 def get_exportable_settings(session_state) -> dict:
     """
