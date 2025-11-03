@@ -1,10 +1,4 @@
-"""Core logic for the RAG Explorer app.
-
-Includes:
-- File parsing (.txt, .pdf, .docx) → LangChain Documents.
-- Chunking, embedding, and FAISS index build/load.
-- Retrieval (dense, BM25, hybrid) and guardrail-aware QA packaging.
-"""
+"""Core logic for chunking, embedding, and retrieval in the RAG Explorer app."""
 
 import io
 import os
