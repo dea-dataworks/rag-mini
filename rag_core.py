@@ -1,15 +1,38 @@
+"""Core logic for the RAG Explorer app.
+
+Includes:
+- File parsing (.txt, .pdf, .docx) → LangChain Documents.
+- Chunking, embedding, and FAISS index build/load.
+- Retrieval (dense, BM25, hybrid) and guardrail-aware QA packaging.
+"""
+
+import io
+import os
+import re
+import math
+import json
+import time
+import logging
+from collections import defaultdict
 from typing import List, Tuple
+
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
 from langchain_community.vectorstores import FAISS
 from pypdf import PdfReader
 from docx import Document as DocxDocument
-from collections import defaultdict  
-import io, os, re, math, json, time
+
 from utils.helpers import compute_score_stats
 from guardrails import evaluate_guardrails, pick_primary_status
-import logging
+
+# === TODOs / Future Refactor Notes ===
+# - Wrap retrieval logic (dense, bm25, hybrid) into a RetrieverEngine class.
+# - Move manifest and pointer functions into a separate IndexManager module.
+# - Add pytest coverage for build_index_from_files() and retrieve().
+# - Add latency logging inside retrieve().
+# - Split file-reading utilities into utils/io_loaders.py.
+
 
 # cache BM25 per-vectorstore to avoid re-tokenizing
 _BM25_CACHE = {}  # key: persist_dir (str) -> SimpleBM25
@@ -17,9 +40,11 @@ _BM25_CACHE = {}  # key: persist_dir (str) -> SimpleBM25
 _TOKENIZER = re.compile(r"\w+").findall
 
 def _tokenize(text: str):
+    """Lowercase tokenization helper for BM25 and quick text parsing."""
     return [t.lower() for t in _TOKENIZER(text or "")]
 
 def _doc_key(doc: Document) -> tuple:
+    """Return a stable key tuple for identifying documents (source, page, prefix)."""
     md = doc.metadata or {}
     return (
         md.get("source", ""),
@@ -75,6 +100,7 @@ def _rrf_fuse(
     rrf_k: int = 60,
     top_k: int = 4,
 ) -> List[tuple]:
+    """Fuse multiple ranked retrieval lists using Reciprocal Rank Fusion (RRF)."""
     acc = defaultdict(float)
     pick = {}  # key -> Document (first seen)
     for result_list in lists:
@@ -296,9 +322,11 @@ def normalize_hits(hits):
     return out
 
 def filter_by_score(pairs, threshold: float):
+    """Filter retrieved pairs by minimum similarity score threshold."""
     return [(d, s) for (d, s) in pairs if (isinstance(s, (float, int)) and s >= threshold) or s is None]
 
 def cap_per_source(pairs, cap: int):
+    """Limit number of retrieved chunks per source file."""
     counts, kept = {}, []
     for d, s in pairs:
         src = (d.metadata or {}).get("source", "unknown")
@@ -339,6 +367,7 @@ def build_citation_tags(docs):
     return [f"{src} p.{pg}" if pg else src for src, pg in ordered]
 
 # --- retrieval ---
+
 def retrieve(
     vs,
     query: str,
@@ -353,6 +382,8 @@ def retrieve(
     - hybrid: BM25 + Dense fused via RRF.
     - bm25: sparse-only over the corpus (NEW).
     """
+    logging.info(f"Retrieval started: mode={mode}, k={k}")
+    
     if vs is None:
         return []
 
