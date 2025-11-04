@@ -6,7 +6,7 @@ Built with Streamlit · LangChain · FAISS · Ollama/OpenAI
 **Local Retrieval-Augmented Generation (RAG) Explorer**  
 A self-contained, Streamlit-based Q&A app with document citations and guardrails.
 
-![demo screenshot or gif here once you capture one]
+![App screenshot](docs/ui_main.png)
 
 ---
 
