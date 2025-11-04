@@ -45,3 +45,5 @@ This file tracks pending improvements and refactors planned for the next version
 
 ## Notes
 These tasks prepare the app for v0.3 “productionization” — containerized, API-ready, and capable of switching between local (Ollama) and remote (OpenAI) modes seamlessly.
+
+Todo (v0.3 cycle): bump LangChain packages to 0.3.*, re-test RAG pipeline compatibility.
