@@ -1,14 +1,30 @@
+# Byte-compiled / cache
 __pycache__/
 *.py[cod]
-venv/
-.env
+*.pyc
+.pytest_cache/
+**/__pycache__/
+
+# Virtual environments
 .venv/
-*.db
-*.log
+.venv*
+venv/
+
+# IDE / tooling
 .vscode/
 .idea/
 .cache/
 .streamlit/
+
+# Logs / databases
+*.log
+*.db
+
+# Data & indexes
+index/*
+!index/.keep
+sample_data/*
+!sample_data/udhr.pdf
 rag_store/
 
 # pytest / Python cache
@@ -26,3 +42,10 @@ sample_data/*
 *.zip
 *.pdf
 .streamlit/
+# Secrets
+.env
+.env.*
+
+# Optional extras
+.DS_Store
+*.bak

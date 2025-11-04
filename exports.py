@@ -1,4 +1,3 @@
-from __future__ import annotations
 import io
 from typing import List, Dict
 from guardrails import guard_export_settings
@@ -81,9 +80,6 @@ def to_markdown(qa: Dict, snippet_max: int = 500) -> str:
         header.append(f"- **Provider used:** {prov_used or ''}{suffix}")
         if meta.get("fallback_reason"):
             header.append(f"- **Reason:** {meta.get('fallback_reason')}")
-
-
-
 
     # Add citations line if present
     citations = qa.get("citations", []) or []

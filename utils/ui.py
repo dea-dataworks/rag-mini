@@ -1,9 +1,17 @@
+"""Streamlit UI components for the RAG Explorer app (buttons, panels, and notes)."""
+
 import os
 import uuid
-import streamlit.components.v1 as components
+
 import streamlit as st
+import streamlit.components.v1 as components
+
 from exports import to_markdown, to_csv_bytes, to_excel_bytes, chat_to_markdown
-from utils.settings import get_exportable_settings
+
+# === TODOs / Future Refactor Notes ===
+# - Consolidate all render_* functions into a UIComponents class for reuse.
+# - Add dark-mode-aware color styles.
+# - Extract repeated download button patterns into a helper.
 
 def render_copy_button(label: str, text: str, key: str | None = None):
     _key = key or str(uuid.uuid4()).replace("-", "")
@@ -29,18 +37,6 @@ def render_copy_button(label: str, text: str, key: str | None = None):
     </script>
     """
     components.html(html, height=38)
-
-# def sidebar_pipeline_diagram():
-#     with st.expander("**Instructions**", expanded=False):
-#         st.markdown(
-#             """
-#             1. Upload one or more files.
-#             2. Type your question in the box.
-#             3. Read the answer and check cited sources below.
-
-#             _Tip: Switch active indexes in the sidebar if you’ve built more than one._
-#             """
-#         )
 
 def render_export_buttons(qa: dict):
     """Render MD/CSV/Excel download buttons for a structured QA dict."""
@@ -73,7 +69,7 @@ def render_copy_row(answer_text: str, citations_text: str):
     with c1:
         render_copy_button("Copy answer", answer_text or "", key="copy_answer_btn")
     with c2:
-        render_copy_button("Copy citations", citations_text or "", key="copy_cites_btn")
+        render_copy_button("Copy Sources", citations_text or "", key="copy_cites_btn")
 
 # --- Why-this-answer panel ---
 def render_why_this_answer(qa: dict, min_items: int = 3, max_items: int = 5):
@@ -169,19 +165,19 @@ def render_dev_metrics(qa: dict):
         if times:
             st.markdown("**Timings (ms)**")
             t_rows = [{"Step": k, "ms": v} for k, v in times.items()]
-            st.dataframe(t_rows, use_container_width=True, hide_index=True)
+            st.dataframe(t_rows, width='stretch', hide_index=True)
 
         if scores:
             st.markdown("**Score stats**")
             s_rows = [{"Stat": k, "Value": v} for k, v in scores.items()]
-            st.dataframe(s_rows, use_container_width=True, hide_index=True)
+            st.dataframe(s_rows, width='stretch', hide_index=True)
 
         vals = [
             r.get("score") for r in qa.get("retrieved_chunks", [])
             if isinstance(r.get("score"), (float, int))
         ]
         if vals:
-            st.bar_chart(vals, use_container_width=True, height=120)
+            st.bar_chart(vals, width='stretch', height=120)
 
 def render_session_export(chat_history, idx_label: str):
     """Render a download button for the full chat transcript with provenance."""
@@ -230,36 +226,6 @@ def render_guardrail_banner(status: dict | None):
         if code != "ok":
             st.info(msg, icon="ℹ️")
         # if ok, show nothing—keeps UI clean
-
-# def get_exportable_settings(state) -> dict:
-#     """
-#     Snapshot of run settings safe for persistence/export. 
-#     Redacts secrets and skips transient UI-only fields.
-#     """
-#     s = state or {}
-
-#     out = {
-#         "provider": s.get("LLM_PROVIDER", "ollama"),
-#         "model": s.get("LLM_MODEL", "mistral"),
-#         "top_k": int(s.get("TOP_K", 4) or 4),
-#         "retrieval_mode": s.get("RETRIEVE_MODE", "dense"),
-#         "chunk_size": int(s.get("CHUNK_SIZE", 800) or 800),
-#         "chunk_overlap": int(s.get("CHUNK_OVERLAP", 120) or 120),
-#         "mmr_lambda": float(s.get("MMR_LAMBDA", 0.7) or 0.7),
-#         "use_history": bool(s.get("use_history", False)),
-#         "max_history_turns": int(s.get("max_history_turns", 4) or 4),
-#         "use_score_threshold": bool(s.get("USE_SCORE_THRESH", False)),
-#         "score_threshold": float(s.get("SCORE_THRESH", 0.4) or 0.4),
-#         "use_per_source_cap": bool(s.get("USE_SOURCE_CAP", False)),
-#         "per_source_cap": int(s.get("PER_SOURCE_CAP", 2) or 2),
-#         "sanitize_retrieved": bool(s.get("SANITIZE_RETRIEVED", True)),
-#     }
-
-#     # Never include secrets; if present, mark redacted.
-#     if s.get("OPENAI_API_KEY"):
-#         out["openai_key"] = "[REDACTED]"
-
-#     return out
 
 # --- Provider / fallback toast helper ---
 def render_provider_fallback_toast(reason: str, from_provider: str, to_provider: str):

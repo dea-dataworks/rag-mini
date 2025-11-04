@@ -1,10 +1,19 @@
-from typing import Optional
+"""Prompt building, model calling, and retrieval chain orchestration for RAG Explorer."""
+
+import logging
+from typing import Optional, List, Dict
+
 from langchain_core.messages import SystemMessage, HumanMessage
-from guardrails import GUARDRAIL_SYSTEM, has_citation, FALLBACK_NO_CITATION
+
+from guardrails import GUARDRAIL_SYSTEM
 from rag_core import load_vectorstore_if_exists, retrieve
 
-# helper to compress prior turns for prompt conditioning
-from typing import List, Dict
+
+# === TODOs / Future Refactor Notes ===
+# - Add token counting + context trimming diagnostics.
+# - Expose temperature, k, and retrieval_mode controls to UI.
+# - Add streaming support for OpenAI + Ollama clients.
+# - Separate chain cache handling into utils/cache.py.
 
 def _format_history_for_prompt(
     chat_history: List[Dict],
@@ -151,17 +160,6 @@ def call_llm(
             # Both providers failed; surface the original + fallback error context.
             raise RuntimeError(f"{reason}; fallback(ollama) error: {e_fallback}") from e_fallback
 
-    # Post-answer guardrail: no citation pattern → return special fallback payload
-    if not has_citation(text):
-        return {
-            "text": FALLBACK_NO_CITATION,
-            "meta": {
-                "provider_used": provider_used,
-                "fallback": fallback,          # keep real fallback flag (usually False here)
-                "reason": reason if fallback else "no_citation",
-            },
-        }
-
     return {
         "text": text,
         "meta": {
@@ -266,6 +264,7 @@ def get_or_build_chain(
 
     def _run(question: str, chat_history=None, use_history: bool = False):
         # 1) retrieve
+        logging.info(f"Running LLM chain: provider={cfg['provider']}, mode={cfg['retrieval_mode']}, k={cfg['k']}")
         pairs = retrieve(
             vs=vs,
             query=question,

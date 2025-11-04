@@ -72,7 +72,7 @@ def run_eval_snapshot(
     modes: List[str],            # ["bm25","hybrid","dense"] any subset
     k: int = 5,
 ) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
-    ...
+
     active_dir = _resolve_active_dir(persist_dir)
     if not active_dir:
         return pd.DataFrame(), {}
@@ -113,8 +113,12 @@ def run_eval_snapshot(
         n = len(df)
         hit_at_k = float(df["hit"].mean()) if n else 0.0
         mrr = float(df["mrr"].mean()) if n else 0.0
-        results_summary.append({"mode": mode, "n": n, "hit@k": hit_at_k, "mrr": mrr})
+        results_summary.append({"mode": mode_lc, "n": n, "hit@k": hit_at_k, "mrr": mrr})
         details_by_mode[mode] = df
 
-    summary_df = pd.DataFrame(results_summary).set_index("mode").sort_values("mrr", ascending=False)
+    summary_df = (
+                pd.DataFrame(results_summary)
+                .set_index("mode")
+                .sort_values("mrr", ascending=False)
+            )
     return summary_df, details_by_mode

@@ -1,6 +1,6 @@
 import re
 from langchain_core.documents import Document
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
 
 # =========================
 # Prompt-injection patterns

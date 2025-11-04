@@ -10,7 +10,7 @@ def _tag(d: Document) -> str:
     m = d.metadata or {}
     src = m.get("source", "unknown")
     pg = m.get("page", None)
-    return f"{src} p.{pg}" if pg else src
+    return f"{src} p.{int(pg)}" if isinstance(pg, (int, float)) else src
 
 def _read_jsonl(path: str):
     rows = []

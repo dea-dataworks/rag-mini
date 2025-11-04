@@ -1,4 +1,11 @@
+"""General-purpose helpers for timeouts, metrics, and settings sanitation in RAG Explorer."""
+
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+
+# === TODOs / Future Refactor Notes ===
+# - Add decorator wrapper for timeouts (for easier reuse).
+# - Extend compute_score_stats with std/var and histogram export.
+# - Integrate sanitize_run_settings into app-level config save.
 
 # --- Timeouts (small, invisible safety net) ---
 RETRIEVAL_TIMEOUT_S = 12
